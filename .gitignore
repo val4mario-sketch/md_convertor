@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+
+# Local AI models and llama.cpp binaries (18 GB, downloaded by: python ocr_vlm.py setup tutti)
+modelli/
+motori/
+
+# Logs and per-user settings
+logs/
+tomdclaude/logs/
+.tomd2_gui_config.json
+.claude/
+
+# Old versions and working notes
+*_backup_pre_vlm.py
+ocr_vlm_v46.py
+patch_vlm.py
+handoff.md
+recensoni*.txt
+
+# Personal study document used as a test
+tomdclaude/examples/metodi_reale.pdf

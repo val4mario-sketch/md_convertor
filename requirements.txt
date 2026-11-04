@@ -1,0 +1,22 @@
+# Core conversions
+pymupdf
+pymupdf4llm
+markitdown
+markdownify
+beautifulsoup4
+openpyxl
+python-pptx
+pandas
+pillow
+img2pdf
+cairosvg
+pypandoc
+tkinterdnd2
+requests
+
+# Readable Markdown -> PDF (tomdclaude); see tomdclaude/requirements.txt
+-r tomdclaude/requirements.txt
+
+# Optional
+# openai-whisper   audio and video transcription (also needs ffmpeg)
+# pillow-heif      HEIC images
