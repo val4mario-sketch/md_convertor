@@ -1,36 +1,36 @@
 """
 convert_av.py
 --------------
-Modulo di conversione per audio e video tramite FFmpeg.
+Audio and video conversion module using FFmpeg.
 
-Estensioni supportate in input :
+Supported input extensions:
     .mp3 .wav .flac .aac .ogg .m4a .opus .wma
     .mp4 .mov .avi .mkv .webm .flv .wmv .m4v
     .gif
 
-Estensioni supportate in output:
+Supported output extensions:
     .mp3 .wav .flac .aac .ogg .m4a .opus
     .mp4 .mov .avi .mkv .webm
     .gif
 
-Funzione principale:
+Main function:
     convert(src: Path, dst: Path, opts: dict | None = None) -> dict
 
-Ritorna sempre un dict con chiavi:
+Always returns a dict with the keys:
     ok      -> bool
-    note    -> str (messaggio informativo o di errore)
-    elapsed -> float (secondi)
+    note    -> str (information or error message)
+    elapsed -> float (seconds)
 
-opts puo' contenere:
-    'bitrate'   -> str, es. '192k' (audio)
-    'fps'       -> int, frame rate video di output
-    'image'     -> str/Path, immagine da usare per audio->video
-    'duration'  -> float, durata in secondi (audio->video se serve troncare)
+opts can contain:
+    'bitrate'   -> str, e.g. '192k' (audio)
+    'fps'       -> int, output video frame rate
+    'image'     -> str/Path, image to use for audio->video
+    'duration'  -> float, duration in seconds (audio->video if trimming is needed)
     'gif_fps'   -> int, default 10
-    'gif_scale' -> int, larghezza in pixel, default 480
+    'gif_scale' -> int, width in pixels, default 480
 
-Dipende da FFmpeg gia' installato sul sistema (winget Gyan.FFmpeg oppure
-KeyShot Studio). Il percorso viene risolto a import-time e memorizzato in
+Depends on FFmpeg already installed on the system (winget Gyan.FFmpeg or
+KeyShot Studio). The path is resolved at import time and stored in
 FFMPEG_PATH / FFPROBE_PATH.
 """
 
@@ -45,17 +45,17 @@ from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
-# Localizzazione di ffmpeg/ffprobe
+# Locating ffmpeg/ffprobe
 # ---------------------------------------------------------------------------
 
 def _find_ffmpeg() -> str | None:
-    """Trova ffmpeg.exe e ritorna il path assoluto, oppure None."""
-    # 1) Prova il PATH normale
+    """Finds ffmpeg.exe and returns its absolute path, or None."""
+    # 1) Try the normal PATH
     found = shutil.which("ffmpeg")
     if found:
         return found
 
-    # 2) Cerca tra i pacchetti winget Gyan.FFmpeg
+    # 2) Look among the winget Gyan.FFmpeg packages
     local_appdata = os.environ.get("LOCALAPPDATA")
     if local_appdata:
         pattern = os.path.join(
@@ -65,11 +65,11 @@ def _find_ffmpeg() -> str | None:
         )
         matches = glob.glob(pattern)
         if matches:
-            # Prendi il piu' recente in ordine alfabetico (la versione piu' alta).
+            # Take the most recent in alphabetical order (the highest version).
             matches.sort()
             return matches[-1]
 
-    # 3) Fallback: KeyShot Studio porta una copia di ffmpeg.
+    # 3) Fallback: KeyShot Studio ships a copy of ffmpeg.
     keyshot = r"C:\Program Files\KeyShot Studio\bin\ffmpeg.exe"
     if os.path.isfile(keyshot):
         return keyshot
@@ -78,7 +78,7 @@ def _find_ffmpeg() -> str | None:
 
 
 def _derive_ffprobe(ffmpeg_path: str | None) -> str | None:
-    """Restituisce il path di ffprobe nella stessa cartella di ffmpeg, se esiste."""
+    """Returns the path of ffprobe in the same folder as ffmpeg, if it exists."""
     if not ffmpeg_path:
         return shutil.which("ffprobe")
     candidate = os.path.join(os.path.dirname(ffmpeg_path), "ffprobe.exe")
@@ -92,7 +92,7 @@ FFPROBE_PATH: str | None = _derive_ffprobe(FFMPEG_PATH)
 
 
 # ---------------------------------------------------------------------------
-# Capacita' dichiarate
+# Declared capabilities
 # ---------------------------------------------------------------------------
 
 _AUDIO_EXTS: tuple[str, ...] = (
@@ -111,13 +111,13 @@ _VIDEO_OUT: tuple[str, ...] = (
     ".mp4", ".mov", ".avi", ".mkv", ".webm",
 )
 
-# .srt/.vtt = sottotitoli generati con Whisper (trascrizione locale)
+# .srt/.vtt = subtitles generated with Whisper (local transcription)
 _SUB_OUT: tuple[str, ...] = (".srt", ".vtt")
 
 SUPPORTED_OUTPUTS: tuple[str, ...] = _AUDIO_OUT + _VIDEO_OUT + (".gif",) + _SUB_OUT
 
 
-# Codec di default per audio in container "esotici"
+# Default codecs for audio in "exotic" containers
 _AUDIO_CODEC_BY_EXT: dict[str, str] = {
     ".mp3": "libmp3lame",
     ".wav": "pcm_s16le",
@@ -151,16 +151,16 @@ def _is_gif(ext: str) -> bool:
 
 
 def supports(src_ext: str, dst_ext: str) -> bool:
-    """Ritorna True se la coppia (src_ext, dst_ext) e' gestita.
+    """Returns True if the pair (src_ext, dst_ext) is handled.
 
-    Le combinazioni gestite sono:
+    The handled combinations are:
         audio -> audio
-        video -> audio (estrazione)
+        video -> audio (extraction)
         video -> video
         video -> gif
-        audio -> video (servira' un'immagine; ne viene generata una se manca)
+        audio -> video (needs an image; one is generated if missing)
         gif   -> video
-        gif   -> gif (riencode)
+        gif   -> gif (re-encode)
     """
     s = _norm_ext(src_ext)
     d = _norm_ext(dst_ext)
@@ -182,21 +182,21 @@ def supports(src_ext: str, dst_ext: str) -> bool:
         return True
     if _is_gif(s) and d == ".gif":
         return True
-    # sottotitoli: da qualsiasi audio o video (trascrizione Whisper)
+    # subtitles: from any audio or video (Whisper transcription)
     if (_is_audio(s) or _is_video(s)) and d in _SUB_OUT:
         return True
-    # audio -> gif non e' significativo
+    # audio -> gif is not meaningful
     return False
 
 
 # ---------------------------------------------------------------------------
-# Helper esecuzione
+# Execution helper
 # ---------------------------------------------------------------------------
 
 import re as _re
 
 def _probe_duration(src: Path) -> float | None:
-    """Durata totale in secondi del file media (via ffprobe). None se ignota."""
+    """Total duration in seconds of the media file (via ffprobe). None if unknown."""
     if not FFPROBE_PATH:
         return None
     try:
@@ -213,27 +213,27 @@ def _probe_duration(src: Path) -> float | None:
 _TIME_RE = _re.compile(r"time=(\d+):(\d+):(\d+\.?\d*)")
 
 def _run_ffmpeg(args: list[str], total_duration: float | None = None) -> tuple[int, str, str]:
-    """Esegue ffmpeg. Se total_duration è nota, stampa il progresso in %
-       (su stdout, riga 'PROGRESS_AV: NN%') leggendo lo stderr in tempo reale.
-       La GUI cattura quelle righe e muove la barra; in CLI si vede comunque."""
+    """Runs ffmpeg. If total_duration is known, prints the progress in %
+       (on stdout, line 'PROGRESS_AV: NN%') by reading stderr in real time.
+       The GUI captures those lines and moves the bar; in the CLI you still see them."""
     cmd = [FFMPEG_PATH] + args
 
     if not total_duration or total_duration <= 0:
-        # Modalità semplice (conversione breve): cattura tutto alla fine.
+        # Simple mode (short conversion): capture everything at the end.
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True,
                                   encoding="utf-8", errors="replace", check=False)
         except FileNotFoundError as e:
-            return 127, "", f"ffmpeg non trovato: {e}"
+            return 127, "", f"ffmpeg not found: {e}"
         return proc.returncode, proc.stdout or "", proc.stderr or ""
 
-    # Modalità con progresso: Popen + lettura stderr riga per riga.
+    # Progress mode: Popen + reading stderr line by line.
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE, text=True,
                                 encoding="utf-8", errors="replace")
     except FileNotFoundError as e:
-        return 127, "", f"ffmpeg non trovato: {e}"
+        return 127, "", f"ffmpeg not found: {e}"
 
     err_tail: list[str] = []
     last_pct = -1
@@ -259,7 +259,7 @@ def _run_ffmpeg(args: list[str], total_duration: float | None = None) -> tuple[i
 
 
 def _short_err(stderr: str, max_lines: int = 6) -> str:
-    """Estrae le ultime righe non vuote di stderr per un messaggio sintetico."""
+    """Extracts the last non-empty lines of stderr for a short message."""
     if not stderr:
         return ""
     lines = [ln.rstrip() for ln in stderr.splitlines() if ln.strip()]
@@ -267,11 +267,11 @@ def _short_err(stderr: str, max_lines: int = 6) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Generazione immagine placeholder per audio -> video
+# Generating a placeholder image for audio -> video
 # ---------------------------------------------------------------------------
 
 def _make_black_image(path: Path, w: int = 1280, h: int = 720) -> bool:
-    """Crea un'immagine PNG nera w x h. Prova prima Pillow, altrimenti ffmpeg."""
+    """Creates a black w x h PNG. Tries Pillow first, otherwise ffmpeg."""
     try:
         from PIL import Image  # type: ignore
 
@@ -281,7 +281,7 @@ def _make_black_image(path: Path, w: int = 1280, h: int = 720) -> bool:
     except Exception:
         pass
 
-    # Fallback: usa ffmpeg con il filtro color
+    # Fallback: use ffmpeg with the color filter
     args = [
         "-y",
         "-f", "lavfi",
@@ -294,7 +294,7 @@ def _make_black_image(path: Path, w: int = 1280, h: int = 720) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Singole strategie di conversione
+# Individual conversion strategies
 # ---------------------------------------------------------------------------
 
 def _convert_audio_to_audio(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
@@ -304,7 +304,7 @@ def _convert_audio_to_audio(src: Path, dst: Path, opts: dict) -> tuple[bool, str
     if codec:
         args += ["-c:a", codec]
     if dst.suffix.lower() in (".flac", ".wav"):
-        # I formati lossless ignorano il bitrate; lo omettiamo.
+        # Lossless formats ignore the bitrate; we omit it.
         pass
     else:
         args += ["-b:a", bitrate]
@@ -312,8 +312,8 @@ def _convert_audio_to_audio(src: Path, dst: Path, opts: dict) -> tuple[bool, str
 
     code, _out, err = _run_ffmpeg(args, total_duration=_probe_duration(src))
     if code != 0:
-        return False, f"ffmpeg fallito (audio->audio): {_short_err(err)}"
-    return True, f"Audio convertito ({src.suffix} -> {dst.suffix})."
+        return False, f"ffmpeg failed (audio->audio): {_short_err(err)}"
+    return True, f"Audio converted ({src.suffix} -> {dst.suffix})."
 
 
 def _convert_video_to_audio(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
@@ -328,8 +328,8 @@ def _convert_video_to_audio(src: Path, dst: Path, opts: dict) -> tuple[bool, str
 
     code, _out, err = _run_ffmpeg(args, total_duration=_probe_duration(src))
     if code != 0:
-        return False, f"ffmpeg fallito (estrazione audio): {_short_err(err)}"
-    return True, f"Audio estratto dal video ({dst.suffix})."
+        return False, f"ffmpeg failed (audio extraction): {_short_err(err)}"
+    return True, f"Audio extracted from the video ({dst.suffix})."
 
 
 def _convert_video_to_video(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
@@ -338,7 +338,7 @@ def _convert_video_to_video(src: Path, dst: Path, opts: dict) -> tuple[bool, str
 
     args = ["-y", "-i", str(src)]
 
-    # Codec video sensati per container
+    # Sensible video codecs per container
     if dst_ext == ".webm":
         args += ["-c:v", "libvpx-vp9", "-c:a", "libopus"]
     elif dst_ext == ".mkv":
@@ -358,7 +358,7 @@ def _convert_video_to_video(src: Path, dst: Path, opts: dict) -> tuple[bool, str
 
     code, _out, err = _run_ffmpeg(args, total_duration=_probe_duration(src))
     if code != 0:
-        return False, f"ffmpeg fallito (video->video): {_short_err(err)}"
+        return False, f"ffmpeg failed (video->video): {_short_err(err)}"
     return True, f"Video transcodificato ({src.suffix} -> {dst.suffix})."
 
 
@@ -370,12 +370,12 @@ def _convert_video_to_gif(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
 
     code, _out, err = _run_ffmpeg(args, total_duration=_probe_duration(src))
     if code != 0:
-        return False, f"ffmpeg fallito (video->gif): {_short_err(err)}"
-    return True, f"GIF generata (fps={fps}, scale={scale})."
+        return False, f"ffmpeg failed (video->gif): {_short_err(err)}"
+    return True, f"GIF generated (fps={fps}, scale={scale})."
 
 
 def _convert_audio_to_video(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
-    """Combina un'immagine statica con l'audio per generare un video."""
+    """Combines a still image with audio to generate a video."""
     image_opt = opts.get("image")
     generated_image: Path | None = None
     note_extra = ""
@@ -383,15 +383,15 @@ def _convert_audio_to_video(src: Path, dst: Path, opts: dict) -> tuple[bool, str
     if image_opt:
         image_path = Path(image_opt)
         if not image_path.exists():
-            return False, f"Immagine indicata non trovata: {image_path}"
+            return False, f"Specified image not found: {image_path}"
     else:
-        # Generiamo un'immagine nera al volo
+        # Generate a black image on the fly
         image_path = dst.parent / f"_av_placeholder_{os.getpid()}.png"
         ok = _make_black_image(image_path)
         if not ok:
-            return False, "Impossibile generare un'immagine placeholder."
+            return False, "Cannot generate a placeholder image."
         generated_image = image_path
-        note_extra = " (immagine nera 1280x720 generata automaticamente)"
+        note_extra = " (black 1280x720 image generated automatically)"
 
     args = [
         "-y",
@@ -407,14 +407,14 @@ def _convert_audio_to_video(src: Path, dst: Path, opts: dict) -> tuple[bool, str
     ]
     if "duration" in opts:
         args += ["-t", str(opts["duration"])]
-    # mp4 vuole moov all'inizio
+    # mp4 wants moov at the start
     if dst.suffix.lower() == ".mp4":
         args += ["-movflags", "+faststart"]
     args.append(str(dst))
 
     code, _out, err = _run_ffmpeg(args)
 
-    # Pulizia immagine generata
+    # Clean up the generated image
     if generated_image is not None:
         try:
             generated_image.unlink()
@@ -422,8 +422,8 @@ def _convert_audio_to_video(src: Path, dst: Path, opts: dict) -> tuple[bool, str
             pass
 
     if code != 0:
-        return False, f"ffmpeg fallito (audio->video): {_short_err(err)}"
-    return True, f"Video creato da audio + immagine{note_extra}."
+        return False, f"ffmpeg failed (audio->video): {_short_err(err)}"
+    return True, f"Video created from audio + image{note_extra}."
 
 
 def _convert_gif_to_video(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
@@ -443,8 +443,8 @@ def _convert_gif_to_video(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
 
     code, _out, err = _run_ffmpeg(args)
     if code != 0:
-        return False, f"ffmpeg fallito (gif->video): {_short_err(err)}"
-    return True, f"GIF convertita in video ({dst_ext})."
+        return False, f"ffmpeg failed (gif->video): {_short_err(err)}"
+    return True, f"GIF converted to video ({dst_ext})."
 
 
 def _convert_gif_to_gif(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
@@ -454,33 +454,33 @@ def _convert_gif_to_gif(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
     args = ["-y", "-i", str(src), "-vf", vf, str(dst)]
     code, _out, err = _run_ffmpeg(args)
     if code != 0:
-        return False, f"ffmpeg fallito (gif->gif): {_short_err(err)}"
+        return False, f"ffmpeg failed (gif->gif): {_short_err(err)}"
     return True, "GIF re-encoded."
 
 
 def _fmt_ts(sec: float, vtt: bool) -> str:
-    """Formatta un timestamp per SRT (virgola) o VTT (punto)."""
+    """Formats a timestamp for SRT (comma) or VTT (dot)."""
     h = int(sec // 3600); m = int(sec % 3600 // 60); s = sec % 60
     sep = "." if vtt else ","
     return f"{h:02d}:{m:02d}:{int(s):02d}{sep}{int((s % 1) * 1000):03d}"
 
 
 def _convert_to_subtitles(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
-    """Audio/video -> sottotitoli .srt/.vtt con Whisper (trascrizione locale).
-       Lento su CPU ma completamente offline e gratuito."""
+    """Audio/video -> .srt/.vtt subtitles with Whisper (local transcription).
+       Slow on CPU but fully offline and free."""
     try:
         import whisper
     except ImportError:
-        return False, ("Per i sottotitoli serve openai-whisper: "
-                       "pip install -U openai-whisper (e ffmpeg nel PATH).")
+        return False, ("Subtitles require openai-whisper: "
+                       "pip install -U openai-whisper (and ffmpeg on the PATH).")
     model_name = str(opts.get("whisper_model") or "base")
-    print(f"  Whisper '{model_name}': trascrivo {src.name} (lento su CPU)...",
+    print(f"  Whisper '{model_name}': trascrivo {src.name} (slow on CPU)...",
           flush=True)
     model = whisper.load_model(model_name)
     res = model.transcribe(str(src), verbose=False)
     segs = res.get("segments", [])
     if not segs:
-        return False, "Whisper non ha prodotto segmenti (audio vuoto?)."
+        return False, "Whisper produced no segments (empty audio?)."
     vtt = dst.suffix.lower() == ".vtt"
     lines: list[str] = ["WEBVTT", ""] if vtt else []
     for i, seg in enumerate(segs, 1):
@@ -497,13 +497,13 @@ def _convert_to_subtitles(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
 
 
 # ---------------------------------------------------------------------------
-# API pubblica
+# Public API
 # ---------------------------------------------------------------------------
 
 def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
-    """Converte un file audio/video tramite ffmpeg.
+    """Converts an audio/video file using ffmpeg.
 
-    Vedi modulo docstring per dettagli su estensioni ed opzioni.
+    See the module docstring for details on extensions and options.
     """
     t0 = time.perf_counter()
     opts = dict(opts or {})
@@ -516,8 +516,8 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             return {
                 "ok": False,
                 "note": (
-                    "ffmpeg.exe non trovato. Installa FFmpeg "
-                    "(winget install Gyan.FFmpeg) o assicurati che sia nel PATH."
+                    "ffmpeg.exe not found. Install FFmpeg "
+                    "(winget install Gyan.FFmpeg) or make sure it is on the PATH."
                 ),
                 "elapsed": time.perf_counter() - t0,
             }
@@ -525,7 +525,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
         if not src.exists():
             return {
                 "ok": False,
-                "note": f"File sorgente non trovato: {src}",
+                "note": f"Source file not found: {src}",
                 "elapsed": time.perf_counter() - t0,
             }
 
@@ -536,7 +536,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             return {
                 "ok": False,
                 "note": (
-                    f"Estensione di input '{src_ext}' non supportata. "
+                    f"Input extension '{src_ext}' not supported. "
                     f"Supportate: {', '.join(SUPPORTED_INPUTS)}."
                 ),
                 "elapsed": time.perf_counter() - t0,
@@ -546,7 +546,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             return {
                 "ok": False,
                 "note": (
-                    f"Estensione di output '{dst_ext}' non supportata. "
+                    f"Output extension '{dst_ext}' not supported. "
                     f"Supportate: {', '.join(SUPPORTED_OUTPUTS)}."
                 ),
                 "elapsed": time.perf_counter() - t0,
@@ -564,7 +564,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             return {
                 "ok": False,
                 "note": (
-                    f"Coppia {src_ext} -> {dst_ext} non supportata. "
+                    f"Coppia {src_ext} -> {dst_ext} not supported. "
                     f"Alternative: {', '.join(alt)}."
                 ),
                 "elapsed": time.perf_counter() - t0,
@@ -590,7 +590,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
         elif dst_ext in _SUB_OUT:
             ok, note = _convert_to_subtitles(src, dst, opts)
         else:
-            ok, note = False, "Coppia gestita logicamente non implementata."
+            ok, note = False, "Logically handled pair not implemented."
 
         return {
             "ok": ok,
@@ -598,9 +598,9 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             "elapsed": time.perf_counter() - t0,
         }
 
-    except Exception as e:  # rete di sicurezza
+    except Exception as e:  # safety net
         return {
             "ok": False,
-            "note": f"Errore imprevisto: {e}",
+            "note": f"Unexpected error: {e}",
             "elapsed": time.perf_counter() - t0,
         }

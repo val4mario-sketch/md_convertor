@@ -1,34 +1,34 @@
 # -*- coding: utf-8 -*-
 """
-ocr_vlm.py — OCR "intelligente" con modelli di VISIONE LOCALI (gratis, offline).
+ocr_vlm.py — "Smart" OCR with LOCAL VISION models (free, offline).
 
-Due motori, entrambi eseguiti da llama.cpp (llama-server) sulla CPU:
+Two engines, both run by llama.cpp (llama-server) on the CPU:
 
-  * PADDLE  = PaddleOCR-VL 1.6 (Baidu, ~0.9 miliardi di parametri)
-              veloce, il migliore su testo dattiloscritto, formule e tabelle.
-              Restituisce testo + LaTeX (niente struttura/figure).
-  * CHANDRA = Chandra OCR 2 (Datalab, ~5 miliardi di parametri, quant. 4 bit)
-              piu' lento, il migliore tra i modelli aperti su SCRITTURA A MANO;
-              restituisce la pagina strutturata (titoli, liste, tabelle,
-              formule KaTeX) e DESCRIVE le figure, che vengono anche ritagliate
-              e salvate come immagini.
-  * IBRIDO  = Paddle su tutte le pagine; Chandra sulle pagine indicate con
-              --hq-pages e su quelle dove Paddle fallisce (testo troppo corto
-              rispetto all'inchiostro, ripetizioni in loop).
+  * PADDLE  = PaddleOCR-VL 1.6 (Baidu, ~0.9 billion parameters)
+              fast, the best on typed text, formulas and tables.
+              Returns text + LaTeX (no structure/figures).
+  * CHANDRA = Chandra OCR 2 (Datalab, ~5 billion parameters, 4-bit quant.)
+              slower, the best open model on HANDWRITING;
+              returns the structured page (headings, lists, tables,
+              KaTeX formulas) and DESCRIBES the figures, which are also cropped
+              and saved as images.
+  * IBRIDO  = Paddle on all pages; Chandra on the pages given with
+              --hq-pages and on those where Paddle fails (text too short
+              for the ink, repetition loops).
 
-Tutto in locale: i modelli si scaricano UNA volta in  <questa cartella>\\modelli
-e llama.cpp sta in  <questa cartella>\\motori\\llamacpp .
+All local: the models are downloaded ONCE into  <this folder>\\modelli
+and llama.cpp is in  <this folder>\\motori\\llamacpp .
 
-Uso da tomd2:   python tomd2.py file.pdf --engine vlm_paddle
-                python tomd2.py file.pdf --engine vlm_chandra --pages 1-20
-                python tomd2.py file.pdf --engine vlm_ibrido --hq-pages 379-453
-Uso diretto:    python ocr_vlm.py setup tutti          (scarica modelli + llama.cpp)
-                python ocr_vlm.py prova file.pdf --pages 12,381 --engine tutti
-                    -> scrive file_prova_paddle.md / file_prova_chandra.md
-                       (NON tocca file .md esistenti) e stampa i tempi.
+Use from tomd2:   python tomd2.py file.pdf --engine vlm_paddle
+                  python tomd2.py file.pdf --engine vlm_chandra --pages 1-20
+                  python tomd2.py file.pdf --engine vlm_ibrido --hq-pages 379-453
+Direct use:       python ocr_vlm.py setup tutti          (downloads models + llama.cpp)
+                  python ocr_vlm.py prova file.pdf --pages 12,381 --engine tutti
+                    -> writes file_prova_paddle.md / file_prova_chandra.md
+                       (does NOT touch existing .md files) and prints the times.
 
-Riprendibile: ogni pagina finita e' salvata in media/<nome>/_vlm_cache/, quindi
-se interrompi e rilanci riparte dalla prima pagina mancante.
+Resumable: each finished page is saved in media/<name>/_vlm_cache/, so
+if you interrupt and run again it restarts from the first missing page.
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ import zipfile
 from pathlib import Path
 
 # ----------------------------------------------------------------------------
-# Percorsi e configurazione
+# Paths and configuration
 # ----------------------------------------------------------------------------
 BASE_DIR   = Path(__file__).resolve().parent
 MODELS_DIR = Path(os.environ.get("TOMD2_MODELS_DIR", BASE_DIR / "modelli"))
@@ -58,23 +58,23 @@ LOG_DIR    = BASE_DIR / "logs"
 HF = "https://huggingface.co"
 IS_WIN = os.name == "nt"
 
-# Quantizzazione Chandra: IQ4_NL (3,05 GB, consigliata con 16 GB di RAM).
-# Alternative: IQ3_M (2,49 GB, piu' veloce, meno preciso), Q6_K (4,08 GB).
+# Chandra quantization: IQ4_NL (3.05 GB, recommended with 16 GB of RAM).
+# Alternatives: IQ3_M (2.49 GB, faster, less accurate), Q6_K (4.08 GB).
 CHANDRA_QUANT = os.environ.get("TOMD2_CHANDRA_QUANT", "IQ4_NL")
-# Quantizzazione Paddle: Q8_0 (498 MB). Il modello e' piccolo: meglio non
-# scendere di piu', la precisione su formule ne risentirebbe.
+# Paddle quantization: Q8_0 (498 MB). The model is small: better not to
+# go lower, accuracy on formulas would suffer.
 PADDLE_QUANT = os.environ.get("TOMD2_PADDLE_QUANT", "Q8_0")
 
 MODELS = {
     "paddle": {
         "nome": "PaddleOCR-VL 1.6",
         "files": [
-            # (repo HuggingFace, file remoto, nome locale)
+            # (HuggingFace repo, remote file, local name)
             ("SanjeevSOLANKI/PaddleOCR-VL-1.6-GGUF",
              f"PaddleOCR-VL-1.6-{PADDLE_QUANT}.gguf", None),
             ("SanjeevSOLANKI/PaddleOCR-VL-1.6-GGUF",
              "PaddleOCR-VL-1.6-mmproj.gguf", None),
-            # template di chat (alcune build di llama.cpp crashano senza)
+            # chat template (some llama.cpp builds crash without it)
             ("EstevaoNaval/PaddleOCR-VL-1.6-GGUF",
              "chat_template.jinja", "PaddleOCR-VL-1.6-chat_template.jinja"),
         ],
@@ -82,8 +82,8 @@ MODELS = {
         "ctx": 8192,
         "max_tokens": int(os.environ.get("TOMD2_PADDLE_MAXTOK", "3000")),
         "dpi": 200,
-        "max_pixels": 2_000_000,      # ~1190x1680 su A4: buon compromesso CPU
-        "prompt": "OCR:",             # NON cambiare: e' un modello specializzato
+        "max_pixels": 2_000_000,      # ~1190x1680 on A4: a good CPU compromise
+        "prompt": "OCR:",             # DO NOT change: it is a specialized model
         "sampling": {"temperature": 0.0, "repeat_penalty": 1.3,
                      "dry_multiplier": 0.8},
     },
@@ -98,17 +98,17 @@ MODELS = {
         "port": 11437,
         "ctx": 16384,
         "max_tokens": int(os.environ.get("TOMD2_CHANDRA_MAXTOK", "5000")),
-        "dpi": 192,                   # come il progetto ufficiale
-        # l'ufficiale usa fino a 3072x2048 (6,3 MP) su GPU; su CPU e' troppo:
-        # 3,1 MP (~1470x2090 su A4) tiene leggibili pedici e scrittura a mano.
+        "dpi": 192,                   # like the official project
+        # the official one uses up to 3072x2048 (6.3 MP) on GPU; too much on CPU:
+        # 3.1 MP (~1470x2090 on A4) keeps subscripts and handwriting readable.
         "max_pixels": 3_100_000,
         "prompt": None,               # -> CHANDRA_PROMPT (sotto)
         "sampling": {"temperature": 0.0, "top_p": 0.1},
     },
 }
 
-# Prompt ufficiale di Chandra OCR 2 (datalab-to/chandra, chandra/prompts.py,
-# OCR_LAYOUT_PROMPT): pagina -> HTML a blocchi con bbox ed etichette.
+# Official Chandra OCR 2 prompt (datalab-to/chandra, chandra/prompts.py,
+# OCR_LAYOUT_PROMPT): page -> block HTML with bboxes and labels.
 _ALLOWED_TAGS = ["math", "br", "i", "b", "u", "del", "sup", "sub", "table",
                  "tr", "td", "p", "th", "div", "pre", "h1", "h2", "h3", "h4",
                  "h5", "ul", "ol", "li", "input", "a", "span", "img", "hr",
@@ -172,10 +172,10 @@ def _log(*a):
 
 
 # ----------------------------------------------------------------------------
-# Download (con ripresa) di modelli e llama.cpp
+# Download (with resume) of models and llama.cpp
 # ----------------------------------------------------------------------------
 def _download(url: str, dest: Path, label: str = "") -> Path:
-    """Scarica url -> dest con RIPRESA (file .part) e percentuale a video."""
+    """Downloads url -> dest with RESUME (.part file) and an on-screen percentage."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() and dest.stat().st_size > 0:
         return dest
@@ -187,13 +187,13 @@ def _download(url: str, dest: Path, label: str = "") -> Path:
     try:
         resp = urllib.request.urlopen(req, timeout=60)
     except urllib.error.HTTPError as e:
-        if e.code == 416 and have:          # gia' completo
+        if e.code == 416 and have:          # already complete
             part.rename(dest)
             return dest
-        raise RuntimeError(f"download fallito ({e.code}) per {url}") from e
+        raise RuntimeError(f"download failed ({e.code}) for {url}") from e
     total = resp.headers.get("Content-Length")
     total = int(total) + have if total else None
-    if have and resp.status != 206:         # il server ignora il Range: riparto
+    if have and resp.status != 206:         # the server ignores Range: restarting
         have = 0
         mode = "wb"
     else:
@@ -217,7 +217,7 @@ def _download(url: str, dest: Path, label: str = "") -> Path:
                          f"({done/1e6:.0f}/{total/1e6:.0f} MB, {speed:.1f} MB/s)")
                     last = pct
     if total and done < total:
-        raise RuntimeError(f"download interrotto ({done}/{total} byte): rilancia, riprende da li'")
+        raise RuntimeError(f"download interrupted ({done}/{total} bytes): run it again, it resumes from there")
     part.rename(dest)
     return dest
 
@@ -242,13 +242,13 @@ def ensure_model(key: str) -> dict:
         dest = MODELS_DIR / (local or remote)
         if dest.exists() and dest.stat().st_size > 0:
             continue
-        _log(f"Scarico {spec['nome']}: {remote} (una tantum) ...")
+        _log(f"Scarico {spec['nome']}: {remote} (one time) ...")
         url = f"{HF}/{repo}/resolve/main/{remote}?download=true"
         try:
             _download(url, dest, label=remote)
         except Exception as e:
-            if remote.endswith(".jinja"):   # il template e' facoltativo
-                _log(f"  [avviso] template non scaricato ({e}): proseguo senza.")
+            if remote.endswith(".jinja"):   # the template is optional
+                _log(f"  [warning] template not downloaded ({e}): continuing without it.")
                 continue
             raise
     return model_paths(key)
@@ -260,11 +260,11 @@ def _server_exe_candidates(gpu: bool) -> list[Path]:
     env = os.environ.get("TOMD2_LLAMA_SERVER")
     if env:
         c.append(Path(env))
-    if gpu:                      # con la GPU serve la build Vulkan, non la CPU
+    if gpu:                      # the GPU needs the Vulkan build, not the CPU one
         c.append(MOTORI_DIR / "llamacpp-vulkan" / exe)
         return c
     c.append(MOTORI_DIR / "llamacpp" / exe)
-    if IS_WIN:   # installazione gia' presente sul PC (usata da img_describe)
+    if IS_WIN:   # installation already on the PC (used by img_describe)
         c.append(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "llamacpp" / exe)
     w = shutil.which("llama-server")
     if w:
@@ -273,16 +273,16 @@ def _server_exe_candidates(gpu: bool) -> list[Path]:
 
 
 def ensure_llamacpp(gpu: bool = False) -> Path:
-    """Ritorna il percorso di llama-server; se manca scarica l'ultima build
-       Windows da GitHub (CPU, oppure Vulkan per la grafica Intel se gpu=True)."""
+    """Returns the path of llama-server; if missing, downloads the latest
+       Windows build from GitHub (CPU, or Vulkan for Intel graphics if gpu=True)."""
     for p in _server_exe_candidates(gpu):
         if p.exists():
             return p
     if not IS_WIN:
-        raise RuntimeError("llama-server non trovato (installa llama.cpp o imposta TOMD2_LLAMA_SERVER).")
+        raise RuntimeError("llama-server not found (install llama.cpp or set TOMD2_LLAMA_SERVER).")
     flavor = "vulkan-x64" if gpu else "cpu-x64"
     target = MOTORI_DIR / ("llamacpp-vulkan" if gpu else "llamacpp")
-    _log(f"Scarico llama.cpp ({flavor}) da GitHub ...")
+    _log(f"Scarico llama.cpp ({flavor}) from GitHub ...")
     with urllib.request.urlopen(urllib.request.Request(
             "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
             headers={"User-Agent": "tomd2"}), timeout=60) as r:
@@ -290,7 +290,7 @@ def ensure_llamacpp(gpu: bool = False) -> Path:
     asset = next((a for a in rel["assets"]
                   if a["name"].endswith(f"bin-win-{flavor}.zip")), None)
     if not asset:
-        raise RuntimeError(f"build llama.cpp '{flavor}' non trovata nella release {rel.get('tag_name')}")
+        raise RuntimeError(f"build llama.cpp '{flavor}' not found in the release {rel.get('tag_name')}")
     zpath = MOTORI_DIR / asset["name"]
     _download(asset["browser_download_url"], zpath)
     target.mkdir(parents=True, exist_ok=True)
@@ -299,12 +299,12 @@ def ensure_llamacpp(gpu: bool = False) -> Path:
     (target / "VERSION.txt").write_text(rel.get("tag_name", "?"), encoding="utf-8")
     exe = target / "llama-server.exe"
     if not exe.exists():
-        raise RuntimeError("llama-server.exe non trovato nello zip scaricato")
+        raise RuntimeError("llama-server.exe not found in the downloaded zip")
     return exe
 
 
 # ----------------------------------------------------------------------------
-# Server llama.cpp (avvio/arresto automatico)
+# llama.cpp server (automatic start/stop)
 # ----------------------------------------------------------------------------
 def _http_json(url: str, payload: dict | None = None, timeout: float = 30):
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -316,8 +316,8 @@ def _http_json(url: str, payload: dict | None = None, timeout: float = 30):
 
 class LlamaServer:
     """with LlamaServer('chandra') as srv: srv.ocr(img) ...
-       Avvia llama-server col modello giusto, aspetta che sia pronto, lo
-       chiude all'uscita. Il log va in logs/llama_server_<motore>.log."""
+       Starts llama-server with the right model, waits until it is ready, and
+       closes it on exit. The log goes to logs/llama_server_<engine>.log."""
 
     def __init__(self, key: str, threads: int | None = None, gpu: bool = False):
         self.key = key
@@ -325,7 +325,7 @@ class LlamaServer:
         self.paths = ensure_model(key)
         self.exe = ensure_llamacpp(gpu)
         self.gpu = gpu
-        self.threads = threads or max(1, (os.cpu_count() or 4) // 2)  # core fisici
+        self.threads = threads or max(1, (os.cpu_count() or 4) // 2)  # physical cores
         self.port = int(os.environ.get(f"TOMD2_{key.upper()}_PORT", self.spec["port"]))
         self.url = f"http://127.0.0.1:{self.port}"
         self.proc = None
@@ -356,7 +356,7 @@ class LlamaServer:
             return False
 
     def start(self):
-        if self._healthy():           # gia' in esecuzione (es. lanciato a mano)
+        if self._healthy():           # already running (e.g. started by hand)
             return self
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         flags = 0x08000000 if IS_WIN else 0   # CREATE_NO_WINDOW
@@ -366,25 +366,25 @@ class LlamaServer:
             cmd = self._cmd(use_template)
             self.logf.write("CMD: " + " ".join(cmd) + "\n\n")
             self.logf.flush()
-            _log(f"  Avvio {self.spec['nome']} (llama.cpp, {self.threads} thread"
-                 f"{', GPU Vulkan' if self.gpu else ''}) ...")
+            _log(f"  Starting {self.spec['nome']} (llama.cpp, {self.threads} thread"
+                 f"{', Vulkan GPU' if self.gpu else ''}) ...")
             self.proc = subprocess.Popen(cmd, stdout=self.logf, stderr=subprocess.STDOUT,
                                          creationflags=flags)
             t0 = time.time()
-            while time.time() - t0 < 600:      # caricamento da disco: fino a 10 min
+            while time.time() - t0 < 600:      # loading from disk: up to 10 min
                 if self.proc.poll() is not None:
                     break
                 if self._healthy():
-                    _log(f"  {self.spec['nome']} pronto in {time.time()-t0:.0f} s")
+                    _log(f"  {self.spec['nome']} ready in {time.time()-t0:.0f} s")
                     return self
                 time.sleep(2)
             self.stop()
             if not use_template:
                 break
-            _log("  [avviso] avvio fallito col template di chat: riprovo senza.")
-        raise RuntimeError(f"llama-server non parte per {self.spec['nome']}: "
+            _log("  [warning] start-up failed with the chat template: retrying without.")
+        raise RuntimeError(f"llama-server does not start for {self.spec['nome']}: "
                            f"guarda {LOG_DIR / f'llama_server_{self.key}.log'} "
-                           "(spesso: llama.cpp troppo vecchio o RAM insufficiente)")
+                           "(often: llama.cpp too old or not enough RAM)")
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -404,13 +404,13 @@ class LlamaServer:
     def __exit__(self, *a):
         self.stop()
 
-    # -- richiesta OCR -------------------------------------------------------
+    # -- OCR request -----------------------------------------------------------
     def ocr(self, img, prompt: str | None = None, max_tokens: int | None = None,
             temperature: float | None = None, expected_tokens: float | None = None,
             label: str = "") -> tuple[str, dict]:
-        """Invia la pagina al modello in STREAMING: mostra l'avanzamento ogni
-           ~10 s (token, velocita', % stimata, ultima riga) e interrompe
-           SUBITO la generazione se il modello entra in un loop."""
+        """Sends the page to the model in STREAMING mode: shows the progress every
+           ~10 s (tokens, speed, estimated %, last line) and stops the generation
+           IMMEDIATELY if the model enters a loop."""
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
@@ -423,7 +423,7 @@ class LlamaServer:
             "max_tokens": limit,
             "stream": True,
             "stream_options": {"include_usage": True},
-            # niente "ragionamento" nascosto (modelli tipo Qwen3.5): solo l'output
+            # no hidden "reasoning" (Qwen3.5-type models): output only
             "chat_template_kwargs": {"enable_thinking": False},
         }
         payload.update(self.spec["sampling"])
@@ -461,7 +461,7 @@ class LlamaServer:
                         think.append(d["reasoning_content"]); ntok += 1
                 if ntok and t_first is None:
                     t_first = time.time()
-                    _log(f"    {label} immagine letta in {t_first - t0:.0f} s, scrivo il testo...")
+                    _log(f"    {label} image read in {t_first - t0:.0f} s, writing the text...")
                 now = time.time()
                 if now - last_print >= 10 and ntok:
                     last_print = now
@@ -471,13 +471,13 @@ class LlamaServer:
                         pct = f" (~{min(99, int(ntok * 100 / expected_tokens))}% stimato)"
                     tail = "".join(parts)[-70:].replace("\n", " ").strip()
                     _log(f"    {label} {ntok} token{pct} | {speed:.1f} t/s | ...{tail}")
-                # controllo loop ogni ~100 token: se si ripete, stop subito
+                # loop check every ~100 tokens: if it repeats, stop right away
                 if ntok % 100 == 0 and ntok >= 300 and detect_repeat("".join(parts)):
                     stopped = "loop"
-                    _log(f"    {label} [LOOP] il modello si ripete: interrompo a {ntok} token")
+                    _log(f"    {label} [LOOP] the model is repeating itself: stopping at {ntok} token")
                     break
         text = "".join(parts)
-        if not text.strip() and think:          # modello che ha scritto solo nel "ragionamento"
+        if not text.strip() and think:          # model that wrote only in the "reasoning"
             text = "".join(think)
         usage = dict(usage or {})
         usage.setdefault("completion_tokens", ntok)
@@ -486,11 +486,11 @@ class LlamaServer:
 
 
 # ----------------------------------------------------------------------------
-# Immagini di pagina
+# Page images
 # ----------------------------------------------------------------------------
 def scale_to_fit(img, max_pixels: int, min_pixels: int = 1792 * 28, grid: int = 28):
-    """Ridimensiona mantenendo le proporzioni, multipli di 28 px (patch
-       del vision encoder), entro max_pixels. Porting da chandra/model/util.py."""
+    """Resizes keeping the proportions, multiples of 28 px (vision encoder
+       patch), within max_pixels. Ported from chandra/model/util.py."""
     from PIL import Image
     w, h = img.size
     if w <= 0 or h <= 0:
@@ -528,8 +528,8 @@ def render_page(doc, i: int, dpi: int):
 
 
 def ink_ratio(img) -> float:
-    """Frazione di pixel 'scuri' (testo/disegni) nella parte centrale della
-       pagina: serve a capire se una pagina vuota e' davvero vuota."""
+    """Fraction of 'dark' pixels (text/drawings) in the central part of the
+       page: used to tell whether an empty page is really empty."""
     g = img.convert("L")
     w, h = g.size
     g = g.crop((int(w * .05), int(h * .06), int(w * .95), int(h * .94)))
@@ -544,8 +544,8 @@ def ink_ratio(img) -> float:
 # ----------------------------------------------------------------------------
 def detect_repeat(text: str, window: int = 500, base_max: int = 4,
                   scaling: float = 3.0) -> bool:
-    """True se il testo finisce con una sequenza ripetuta troppe volte
-       (loop del modello). Porting semplificato da chandra/model/util.py."""
+    """True if the text ends with a sequence repeated too many times
+       (model loop). Simplified port from chandra/model/util.py."""
     t = text[-4000:]
     for L in range(1, window // 2 + 1):
         cand = t[-L:]
@@ -559,7 +559,7 @@ def detect_repeat(text: str, window: int = 500, base_max: int = 4,
             pos -= L
         if reps > max_rep:
             return True
-    # righe identiche consecutive
+    # consecutive identical lines
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     run = 1
     for a, b in zip(lines, lines[1:]):
@@ -570,7 +570,7 @@ def detect_repeat(text: str, window: int = 500, base_max: int = 4,
 
 
 def trim_repeats(text: str) -> str:
-    """Taglia le righe identiche ripetute oltre la 3a volta consecutiva."""
+    """Cuts identical lines repeated beyond the 3rd consecutive time."""
     out, prev, run = [], None, 0
     for ln in text.splitlines():
         run = run + 1 if ln.strip() and ln == prev else 1
@@ -587,8 +587,8 @@ def normalize_math(md: str) -> str:
 
 
 def math_issues(md: str) -> int:
-    """Conta le formule con parentesi graffe sbilanciate o \\left/\\right
-       spaiati (controllo leggero, senza KaTeX)."""
+    """Counts formulas with unbalanced braces or unmatched \\left/\\right
+       (a light check, without KaTeX)."""
     n = 0
     formulas = re.findall(r"\$\$(.+?)\$\$", md, flags=re.S)
     rest = re.sub(r"\$\$(.+?)\$\$", " ", md, flags=re.S)
@@ -603,7 +603,7 @@ def math_issues(md: str) -> int:
 
 
 def _md_escape_fallback(html: str) -> str:
-    """Conversione HTML->Markdown minimale (se mancano bs4/markdownify)."""
+    """Minimal HTML->Markdown conversion (if bs4/markdownify are missing)."""
     s = html
     s = re.sub(r"<math[^>]*display=\"?block\"?[^>]*>(.*?)</math>", r"\n$$\n\1\n$$\n", s, flags=re.S)
     s = re.sub(r"<math[^>]*>(.*?)</math>", r"$\1$", s, flags=re.S)
@@ -620,17 +620,17 @@ def _md_escape_fallback(html: str) -> str:
 
 
 def fix_list_markers(md: str) -> str:
-    """'- - testo', '- o testo', '- • testo' -> '- testo' (il modello copia
-       anche il trattino/cerchietto originale dentro la voce di elenco)."""
+    """'- - text', '- o text', '- • text' -> '- text' (the model also copies
+       the original dash/bullet into the list item)."""
     return re.sub(r"(?m)^([ \t]*)[-*][ \t]+(?:[-–•◦▪○o]|\\-)[ \t]+(?=\S)", r"\1- ", md)
 
 
 def chandra_html_to_md(html: str, img, page_no: int, fig_dir: Path,
                        fig_prefix: str) -> str:
-    """HTML a blocchi di Chandra -> Markdown nello stile tomd2:
-       - salta intestazioni/piè di pagina (Page-Header/Page-Footer)
-       - figure: ritaglio salvato come PNG + blocco descrizione
-       - formule <math> -> $...$ / $$...$$ (KaTeX)"""
+    """Chandra block HTML -> Markdown in the tomd2 style:
+       - skips headers/footers (Page-Header/Page-Footer)
+       - figures: crop saved as PNG + description block
+       - <math> formulas -> $...$ / $$...$$ (KaTeX)"""
     try:
         from bs4 import BeautifulSoup
         from markdownify import MarkdownConverter
@@ -639,11 +639,11 @@ def chandra_html_to_md(html: str, img, page_no: int, fig_dir: Path,
 
     class _MD(MarkdownConverter):
         def convert_table(self, el, text, *a, **k):
-            return "\n\n" + str(el) + "\n\n"     # tabelle complesse: HTML intatto
+            return "\n\n" + str(el) + "\n\n"     # complex tables: HTML intact
 
     def to_md(fragment: str) -> str:
-        # le formule vengono tolte PRIMA di markdownify (che altrimenti
-        # "escaperebbe" _ * \\ ...) e rimesse dopo, intatte
+        # formulas are removed BEFORE markdownify (which would otherwise
+        # "escape" _ * \\ ...) and put back afterwards, intact
         frag = BeautifulSoup(fragment, "html.parser")
         stash = []
         for m in frag.find_all("math"):
@@ -701,10 +701,10 @@ def chandra_html_to_md(html: str, img, page_no: int, fig_dir: Path,
 
 
 # ----------------------------------------------------------------------------
-# Selezione pagine
+# Page selection
 # ----------------------------------------------------------------------------
 def parse_pages(spec: str | None, n: int) -> list[int]:
-    """'1-10,15,379-383' -> [1..10, 15, 379..383] (1-based, entro n)."""
+    """'1-10,15,379-383' -> [1..10, 15, 379..383] (1-based, within n)."""
     if not spec:
         return list(range(1, n + 1))
     out = set()
@@ -724,7 +724,7 @@ def parse_pages(spec: str | None, n: int) -> list[int]:
 
 
 # ----------------------------------------------------------------------------
-# Conversione di un PDF / immagine
+# Converting a PDF / image
 # ----------------------------------------------------------------------------
 def _cache_file(cache_dir: Path, key: str, page: int) -> Path:
     return cache_dir / key / f"page_{page:04d}.md"
@@ -744,14 +744,14 @@ def _ocr_one(srv: LlamaServer, key: str, page_img, page_no: int,
     label = f"[{key} p.{page_no}]"
     raw, usage = srv.ocr(img, expected_tokens=expected_tokens, label=label)
     retried = False
-    if usage.get("stopped") == "loop":     # loop: secondo tentativo "mosso"
+    if usage.get("stopped") == "loop":     # loop: second "shifted" attempt
         retried = True
-        _log(f"    {label} secondo tentativo...")
+        _log(f"    {label} second attempt...")
         raw2, usage2 = srv.ocr(img, temperature=0.3, expected_tokens=expected_tokens,
                                label=label)
         if usage2.get("stopped") != "loop" or len(raw2) > len(raw):
             raw, usage = raw2, usage2
-    if raw_file is not None:               # sempre: il testo grezzo del modello
+    if raw_file is not None:               # always: the raw text of the model
         raw_file.parent.mkdir(parents=True, exist_ok=True)
         raw_file.write_text(raw, encoding="utf-8")
     raw_clean = _strip_fences(raw)
@@ -760,14 +760,14 @@ def _ocr_one(srv: LlamaServer, key: str, page_img, page_no: int,
         try:
             md = chandra_html_to_md(raw_clean, img, page_no, fig_dir, fig_prefix)
         except Exception as e:
-            _log(f"    {label} [avviso] conversione HTML fallita ({e}): uso il ripiego")
+            _log(f"    {label} [warning] HTML conversion failed ({e}): using the fallback")
         if not md.strip() and raw_clean.strip():
-            md = _md_escape_fallback(raw_clean)      # HTML troncato o anomalo
+            md = _md_escape_fallback(raw_clean)      # truncated or abnormal HTML
     else:
         md = raw_clean
     md = normalize_math(trim_repeats(md)).strip()
     if not md and raw_clean.strip():
-        md = raw_clean.strip()                       # mai perdere il testo letto
+        md = raw_clean.strip()                       # never lose the text that was read
     meta = {"secondi": round(time.time() - t0, 1),
             "token_out": usage.get("completion_tokens"),
             "token_in": usage.get("prompt_tokens"),
@@ -777,14 +777,14 @@ def _ocr_one(srv: LlamaServer, key: str, page_img, page_no: int,
 
 
 # ----------------------------------------------------------------------------
-# PaddleOCR-VL "completo" (pipeline ufficiale Baidu): un piccolo modello di
-# LAYOUT (PP-DocLayoutV3, gira su CPU) divide la pagina in blocchi (titoli,
-# paragrafi, formule, tabelle, figure, note) e manda OGNI blocco al modello
-# PaddleOCR-VL sul nostro llama-server con il prompt giusto ("OCR:",
-# "Formula Recognition:", "Table Recognition:"). E' cosi' che Paddle e' stato
-# pensato e misurato nei benchmark: molto meglio della pagina intera.
+# "Full" PaddleOCR-VL (official Baidu pipeline): a small LAYOUT
+# model (PP-DocLayoutV3, runs on CPU) splits the page into blocks (headings,
+# paragraphs, formulas, tables, figures, notes) and sends EACH block to the
+# PaddleOCR-VL model on our llama-server with the right prompt ("OCR:",
+# "Formula Recognition:", "Table Recognition:"). This is how Paddle was
+# designed and benchmarked: much better than the whole page.
 # Richiede:  pip install paddlepaddle "paddleocr[doc-parser]"   (setup layout)
-# Se non e' installato, si ripiega sulla pagina intera con "OCR:".
+# If not installed, it falls back to the whole page with "OCR:".
 # ----------------------------------------------------------------------------
 def paddle_layout_disponibile() -> bool:
     if os.environ.get("TOMD2_PADDLE_LAYOUT", "1") == "0":
@@ -800,17 +800,17 @@ def paddle_layout_disponibile() -> bool:
 class PaddleLayout:
     def __init__(self, server_url: str):
         from paddleocr import PaddleOCRVL
-        _log("  Carico il modello di layout PP-DocLayoutV3 (la prima volta lo scarica) ...")
+        _log("  Loading the PP-DocLayoutV3 layout model (downloaded the first time) ...")
         self.pipe = PaddleOCRVL(
             pipeline_version="v1.6",
             vl_rec_backend="llama-cpp-server",
             vl_rec_server_url=server_url.rstrip("/") + "/v1",
-            vl_rec_max_concurrency=1,          # un blocco alla volta: CPU
+            vl_rec_max_concurrency=1,          # one block at a time: CPU
             device="cpu",
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_chart_recognition=False,
-            # togliamo intestazioni/pie' di pagina/numeri, ma TENIAMO le note
+            # remove headers/footers/numbers, but KEEP the notes
             markdown_ignore_labels=["number", "header", "header_image",
                                     "footer", "footer_image", "aside_text"],
         )
@@ -834,21 +834,21 @@ class PaddleLayout:
                     text = text.replace(rel, f"{fig_prefix}/{name}")
                 parts.append(text)
         md = "\n\n".join(parts)
-        # segnaposto descrittivo accanto a ogni figura ritagliata
+        # descriptive placeholder next to each cropped figure
         md = re.sub(r"(<img[^>]*>|!\[[^\]]*\]\([^)]*\))",
                     lambda m: m.group(1) + f"\n\n> **[Figura — pag. {page_no}]** "
-                    "*(immagine ritagliata; nessuna descrizione con questo motore)*", md)
+                    "*(cropped image; no description with this engine)*", md)
         return normalize_math(md).strip()
 
 
-# righe di intestazione / pie' di pagina da eliminare (Paddle le trascrive)
+# header/footer lines to remove (Paddle transcribes them)
 _PAGE_NUM_RE = re.compile(r"^\s*(pag(\.|ina)?\s*)?\d+\s*(a|di|/|of)\s*\d+\s*$", re.I)
 
 
 def strip_running_lines(pages_md: dict[int, str]) -> dict[int, str]:
-    """Toglie intestazioni / pie' di pagina: righe IDENTICHE che compaiono
-       nelle prime/ultime 2 righe di almeno meta' delle pagine (minimo 3), e
-       le righe tipo 'Pag. 12 a 506'. Non tocca mai il resto del testo."""
+    """Removes headers/footers: IDENTICAL lines appearing in
+       the first/last 2 lines of at least half the pages (minimum 3), and
+       lines such as 'Pag. 12 a 506'. Never touches the rest of the text."""
     from collections import Counter
     def norm(l):
         return re.sub(r"\s+", " ", l.strip().lower())
@@ -875,7 +875,7 @@ def strip_running_lines(pages_md: dict[int, str]) -> dict[int, str]:
 
 def convert_file(src: Path, mode: str, args=None,
                  out_assets: Path | None = None) -> tuple[str, Path]:
-    """mode: 'paddle' | 'chandra' | 'ibrido'. Ritorna (markdown, cartella_media)."""
+    """mode: 'paddle' | 'chandra' | 'ibrido'. Returns (markdown, media_folder)."""
     import fitz
     from PIL import Image
 
@@ -909,7 +909,7 @@ def convert_file(src: Path, mode: str, args=None,
             return render_page(doc, p - 1, dpi)
         return Image.open(src).convert("RGB")
 
-    # chi fa cosa
+    # who does what
     if mode == "paddle":
         plan = {"paddle": list(pages), "chandra": []}
     elif mode == "chandra":
@@ -918,7 +918,7 @@ def convert_file(src: Path, mode: str, args=None,
         plan = {"paddle": [p for p in pages if p not in hq],
                 "chandra": [p for p in pages if p in hq]}
 
-    results: dict[int, tuple[str, str]] = {}   # pagina -> (motore, md)
+    results: dict[int, tuple[str, str]] = {}   # page -> (engine, md)
     stats = {"paddle": [], "chandra": []}
     tok_hist = {"paddle": [], "chandra": []}
     total_jobs = len(plan["paddle"]) + len(plan["chandra"])
@@ -926,7 +926,7 @@ def convert_file(src: Path, mode: str, args=None,
 
     def run_engine(key: str, plist: list[int]):
         nonlocal done_jobs
-        # cache separata per la modalita' Paddle "completa" (layout)
+        # separate cache for "full" Paddle mode (layout)
         ckey = "paddle_layout" if (key == "paddle" and plist
                                    and paddle_layout_disponibile()) else key
         todo = []
@@ -944,7 +944,7 @@ def convert_file(src: Path, mode: str, args=None,
             else:
                 todo.append(p)
         if plist and len(todo) < len(plist):
-            _log(f"  [{key}] {len(plist)-len(todo)} pagine gia' fatte (cache), ne restano {len(todo)}")
+            _log(f"  [{key}] {len(plist)-len(todo)} pages already done (cache), remaining {len(todo)}")
         if not todo:
             return retry_with_chandra
         with LlamaServer(key, threads=threads, gpu=gpu) as srv:
@@ -952,17 +952,17 @@ def convert_file(src: Path, mode: str, args=None,
             if key == "paddle" and paddle_layout_disponibile():
                 try:
                     layout = PaddleLayout(srv.url)
-                    _log("  [paddle] modalita' COMPLETA: layout + riconoscimento per blocchi")
+                    _log("  [paddle] FULL mode: layout + recognition by blocks")
                 except Exception as e:
-                    _log(f"  [paddle] layout non disponibile ({type(e).__name__}: {e}); uso la pagina intera")
+                    _log(f"  [paddle] layout not available ({type(e).__name__}: {e}); using the whole page")
             elif key == "paddle":
-                _log("  [paddle] modalita' semplice (pagina intera). Per la modalita' completa: "
+                _log("  [paddle] simple mode (whole page). For full mode: "
                      "python ocr_vlm.py setup layout")
             for j, p in enumerate(todo, 1):
                 img = page_image(p, MODELS[key]["dpi"])
                 ink = ink_ratio(img)
                 if ink < 0.0003:
-                    md, meta = "*(pagina vuota)*", {"secondi": 0, "vuota": True}
+                    md, meta = "*(empty page)*", {"secondi": 0, "vuota": True}
                 else:
                     toks = [m for m in tok_hist[key] if m]
                     exp = (sum(toks) / len(toks)) if toks else None
@@ -974,7 +974,7 @@ def convert_file(src: Path, mode: str, args=None,
                             meta = {"secondi": round(time.time() - t0p, 1),
                                     "modo": "layout", "fermato": None}
                         except Exception as e:
-                            _log(f"    [paddle p.{p}] layout fallito ({type(e).__name__}: {e}); pagina intera")
+                            _log(f"    [paddle p.{p}] layout failed ({type(e).__name__}: {e}); whole page")
                             md = None
                     if md is None:
                         md, meta = _ocr_one(srv, key, img, p, fig_dir, fig_prefix,
@@ -982,7 +982,7 @@ def convert_file(src: Path, mode: str, args=None,
                                             raw_file=cache_dir / ckey / f"page_{p:04d}.raw.txt")
                     if meta.get("token_out") and meta.get("fermato") is None:
                         tok_hist[key].append(meta["token_out"])
-                    # pagina "sospetta": tanto inchiostro, poco testo, o loop
+                    # "suspicious" page: much ink, little text, or a loop
                     if key == "paddle" and mode == "ibrido" and (
                             meta.get("loop") or (ink > 0.03 and len(md) < 150)):
                         meta["sospetta"] = True
@@ -998,19 +998,19 @@ def convert_file(src: Path, mode: str, args=None,
                 eta = media * (len(todo) - j)
                 _log(f"  [{key}] pagina {p} ({j}/{len(todo)}): {meta.get('secondi',0):.0f} s"
                      f"{'  [LOOP]' if meta.get('loop') else ''}"
-                     f"{'  [TAGLIATA AL LIMITE]' if meta.get('fermato') == 'limite' else ''}"
-                     f"  | stima residua {eta/60:.0f} min")
+                     f"{'  [CUT AT THE LIMIT]' if meta.get('fermato') == 'limite' else ''}"
+                     f"  | time left {eta/60:.0f} min")
                 _log(f"  OCR: {int(done_jobs*100/max(1,total_jobs))}% ({done_jobs}/{total_jobs})")
         return retry_with_chandra
 
     t_start = time.time()
     retry = run_engine("paddle", plan["paddle"])
     if retry:
-        _log(f"  [ibrido] {len(retry)} pagine sospette passano a Chandra: {retry}")
+        _log(f"  [ibrido] {len(retry)} suspicious pages go to Chandra: {retry}")
         total_jobs += len(retry)
     run_engine("chandra", sorted(set(plan["chandra"]) | set(retry)))
 
-    # immagini di pagina (backup visivo, WebP leggero)
+    # page images (visual backup, light WebP)
     page_links = {}
     if keep_page_images and doc is not None:
         pdir = assets / "_pages"
@@ -1024,7 +1024,7 @@ def convert_file(src: Path, mode: str, args=None,
     if doc is not None:
         doc.close()
 
-    # assemblaggio (senza intestazioni / pie' di pagina ripetuti)
+    # assembly (without repeated headers/footers)
     if len(results) >= 2:
         cleaned = strip_running_lines({p: md for p, (k, md) in results.items()})
         results = {p: (results[p][0], cleaned[p]) for p in results}
@@ -1035,33 +1035,33 @@ def convert_file(src: Path, mode: str, args=None,
     parts = []
     issues = 0
     for p in pages:
-        key, md = results.get(p, ("?", "*(pagina non convertita)*"))
+        key, md = results.get(p, ("?", "*(page not converted)*"))
         issues += math_issues(md)
         parts.append(f"\n\n<!-- ===== Pagina {p} di {n} | motore: {key} ===== -->\n")
         if p in page_links:
-            parts.append(f"<!-- immagine pagina: {page_links[p]} -->\n")
+            parts.append(f"<!-- page image: {page_links[p]} -->\n")
         parts.append("\n" + md + "\n")
     tot = time.time() - t_start
     sp = stats["paddle"]; sc = stats["chandra"]
     summary = (f"<!-- OCR VLM locale: {len(pages)} pagine | "
-               f"Paddle {len(sp)} pag. (media {sum(sp)/max(1,len(sp)):.0f} s) | "
-               f"Chandra {len(sc)} pag. (media {sum(sc)/max(1,len(sc)):.0f} s) | "
-               f"formule sospette: {issues} | totale {tot/60:.1f} min -->\n")
+               f"Paddle {len(sp)} pages (average {sum(sp)/max(1,len(sp)):.0f} s) | "
+               f"Chandra {len(sc)} pages (average {sum(sc)/max(1,len(sc)):.0f} s) | "
+               f"suspicious formulas: {issues} | totale {tot/60:.1f} min -->\n")
     _log("  " + summary.strip("<!-> \n"))
     return summary + "".join(parts).strip() + "\n", assets
 
 
 # ----------------------------------------------------------------------------
-# CLI: setup / prova
+# CLI: setup / test
 # ----------------------------------------------------------------------------
 def _cli():
-    ap = argparse.ArgumentParser(description="OCR locale con PaddleOCR-VL e Chandra OCR 2 (llama.cpp).")
+    ap = argparse.ArgumentParser(description="Local OCR with PaddleOCR-VL and Chandra OCR 2 (llama.cpp).")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("setup", help="Scarica llama.cpp e i modelli (una tantum).")
+    s = sub.add_parser("setup", help="Downloads llama.cpp and the models (one time).")
     s.add_argument("quali", nargs="?", default="tutti",
                    choices=["tutti", "paddle", "chandra", "layout"])
-    s.add_argument("--gpu", action="store_true", help="Scarica anche llama.cpp Vulkan (grafica Intel).")
-    p = sub.add_parser("prova", help="Prova su alcune pagine: scrive <nome>_prova_<motore>.md")
+    s.add_argument("--gpu", action="store_true", help="Also download llama.cpp Vulkan (Intel graphics).")
+    p = sub.add_parser("prova", help="Test on some pages: writes <name>_prova_<engine>.md")
     p.add_argument("file")
     p.add_argument("--pages", default="1-3")
     p.add_argument("--engine", default="tutti", choices=["tutti", "paddle", "chandra"])
@@ -1070,14 +1070,14 @@ def _cli():
     a = ap.parse_args()
 
     if a.cmd == "setup" and a.quali == "layout":
-        _log("Installo PaddlePaddle (CPU) + PaddleOCR (pipeline completa con layout) ...")
+        _log("Installing PaddlePaddle (CPU) + PaddleOCR (full pipeline with layout) ...")
         r = subprocess.call([sys.executable, "-m", "pip", "install", "-U",
                              "--timeout", "120", "--retries", "10",
                              "paddlepaddle", "paddleocr[doc-parser]"])
         if r != 0:
-            _log("Installazione non riuscita: rilancia il comando (la rete ha interrotto?)")
+            _log("Installation failed: run the command again (did the network drop?)")
             return
-        _log("Fatto. Il modello di layout si scarica da solo al primo uso.")
+        _log("Done. The layout model downloads by itself on first use.")
         return
     if a.cmd == "setup":
         ensure_llamacpp(False)
@@ -1086,7 +1086,7 @@ def _cli():
         keys = ["paddle", "chandra"] if a.quali == "tutti" else [a.quali]
         for k in keys:
             ensure_model(k)
-        _log("Setup completato. Modelli in: " + str(MODELS_DIR))
+        _log("Setup completed. Models in: " + str(MODELS_DIR))
         return
 
     src = Path(a.file)

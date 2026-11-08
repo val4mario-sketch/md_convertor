@@ -1,19 +1,19 @@
-"""Primo test case: conversione MD -> PDF leggibile + verifica del gatekeeper.
+"""First test case: readable MD -> PDF conversion + gatekeeper check.
 
-Esecuzione (dalla cartella che contiene il package, cioe' "CONVERTITORE UNIVERSALE"):
+Run (from the folder containing the package):
 
     python -m tomdclaude.tests.test_md_to_pdf
 
-Compatibile anche con pytest:
+Also compatible with pytest:
 
     pytest tomdclaude/tests/test_md_to_pdf.py
 
-Copre:
-  1. POSITIVO  — report_demo.md -> PDF: conversione riuscita, file salvato,
-     PDF valido (>=1 pagina), struttura dei titoli preservata, nessun errore.
-  2. GATEKEEPER — un convertitore "rotto" che produce un finto PDF deve essere
-     RIFIUTATO: il file NON viene salvato e viene prodotto un log dettagliato.
-  3. UNIT      — i validatori segnalano correttamente i casi di perdita dati.
+Covers:
+  1. POSITIVE   — report_demo.md -> PDF: successful conversion, file saved,
+     valid PDF (>=1 page), heading structure preserved, no errors.
+  2. GATEKEEPER — a "broken" converter producing a fake PDF must be
+     REJECTED: the file is NOT saved and a detailed log is produced.
+  3. UNIT       — the validators correctly flag the data-loss cases.
 """
 from __future__ import annotations
 
@@ -34,26 +34,26 @@ log = get_logger(verbose=False)
 
 # --------------------------------------------------------------------------- 1
 def test_md_to_pdf_readable():
-    """report_demo.md -> PDF: conversione valida e file salvato."""
+    """report_demo.md -> PDF: valid conversion and file saved."""
     out = _PKG / "examples" / "report_demo.pdf"
     res = convert(_DEMO_MD, out, {"overwrite": True}, logger=log)
 
-    assert res.ok, f"conversione fallita: {res.note} | {[str(i) for i in res.errors]}"
-    assert res.committed and out.exists(), "il PDF non e' stato salvato"
-    assert out.stat().st_size > 1000, "PDF troppo piccolo"
-    assert res.dst_metadata.get("pages", 0) >= 1, "PDF senza pagine"
-    assert not res.errors, f"errori inattesi: {[str(i) for i in res.errors]}"
+    assert res.ok, f"conversion failed: {res.note} | {[str(i) for i in res.errors]}"
+    assert res.committed and out.exists(), "the PDF was not saved"
+    assert out.stat().st_size > 1000, "PDF too small"
+    assert res.dst_metadata.get("pages", 0) >= 1, "PDF with no pages"
+    assert not res.errors, f"unexpected errors: {[str(i) for i in res.errors]}"
 
-    # struttura dei titoli preservata (sorgente vs HTML renderizzato)
+    # heading structure preserved (source vs rendered HTML)
     src_levels = [lvl for lvl, _ in res.src_metadata["headings"]]
     dst_levels = [lvl for lvl, _ in res.dst_metadata["html_headings"]]
-    assert src_levels == dst_levels, f"gerarchia titoli alterata: {src_levels} != {dst_levels}"
+    assert src_levels == dst_levels, f"heading hierarchy altered: {src_levels} != {dst_levels}"
     return res, out
 
 
 # --------------------------------------------------------------------------- 2
 class _BrokenConverter(BaseConverter):
-    """Simula un convertitore che 'perde i dati': scrive un file NON-PDF."""
+    """Simulates a converter that 'loses data': writes a NON-PDF file."""
 
     name = "broken_md_to_xpdf"
     source_formats = frozenset({"md", "markdown"})
@@ -71,25 +71,25 @@ class _BrokenConverter(BaseConverter):
         return [PdfIntegrityValidator()]
 
     def convert(self, src, dst, opts):
-        Path(dst).write_bytes(b"QUESTO NON E UN PDF")  # output corrotto di proposito
-        return {"note": "output volutamente non valido"}
+        Path(dst).write_bytes(b"THIS IS NOT A PDF")  # deliberately corrupted output
+        return {"note": "deliberately invalid output"}
 
 
 def test_gatekeeper_blocks_bad_output():
-    """Il gatekeeper deve rifiutare l'output corrotto e NON salvare nulla."""
+    """The gatekeeper must reject the corrupted output and save NOTHING."""
     registry._CONVERTERS.insert(0, _BrokenConverter)
     try:
         out = _PKG / "examples" / "_should_not_exist.xpdf"
         out.unlink(missing_ok=True)
         res = convert(_DEMO_MD, out, {"overwrite": True}, logger=log)
 
-        assert not res.ok, "il gatekeeper NON ha bloccato un output corrotto"
+        assert not res.ok, "the gatekeeper did NOT block a corrupted output"
         assert not res.committed, "committed=True su output rifiutato"
-        assert not out.exists(), "il file corrotto e' stato salvato (NON doveva)"
-        assert res.errors, "nessun errore registrato dal validator"
-        assert res.log_path and Path(res.log_path).exists(), "log di fallimento non prodotto"
+        assert not out.exists(), "the corrupted file was saved (it should NOT have been)"
+        assert res.errors, "no error recorded by the validator"
+        assert res.log_path and Path(res.log_path).exists(), "failure log not produced"
         codes = {i.code for i in res.errors}
-        assert "not_a_pdf" in codes, f"atteso 'not_a_pdf', ottenuti {codes}"
+        assert "not_a_pdf" in codes, f"expected 'not_a_pdf', got {codes}"
     finally:
         registry._CONVERTERS.remove(_BrokenConverter)
     return res
@@ -97,7 +97,7 @@ def test_gatekeeper_blocks_bad_output():
 
 # --------------------------------------------------------------------------- 3
 def test_md_validator_detects_missing_heading():
-    """Unit: un titolo assente dal PDF viene segnalato come errore bloccante."""
+    """Unit: a heading absent from the PDF is flagged as a blocking error."""
     src_meta = {"headings": [(1, "Introduzione"), (2, "Obiettivi")], "n_tables": 0, "text_len": 200}
     dst_meta = {
         "html_headings": [(1, "Introduzione"), (2, "Obiettivi")],
@@ -108,11 +108,11 @@ def test_md_validator_detects_missing_heading():
     issues = MarkdownStructureValidator().validate(src_meta, dst_meta, {})
     blocking = [i for i in issues if i.blocking]
     assert any(i.code == "heading_missing_in_pdf" for i in blocking), \
-        f"il validator non ha rilevato il titolo mancante: {[str(i) for i in issues]}"
+        f"the validator did not detect the missing heading: {[str(i) for i in issues]}"
 
 
 def test_pdf_validator_detects_short_text():
-    """Unit: un PDF quasi vuoto rispetto al sorgente e' bloccato."""
+    """Unit: a PDF nearly empty compared with the source is blocked."""
     import tempfile
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
         f.write(b"%PDF-1.7 minimal")
@@ -122,7 +122,7 @@ def test_pdf_validator_detects_short_text():
         dst_meta = {"pages": 1, "pdf_text_len": 3}
         issues = PdfIntegrityValidator().validate(src_meta, dst_meta, {"tmp": tmp})
         assert any(i.code == "text_too_short" and i.blocking for i in issues), \
-            f"testo troppo corto non rilevato: {[str(i) for i in issues]}"
+            f"text too short not detected: {[str(i) for i in issues]}"
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -145,7 +145,7 @@ In un elenco (display indentato, caso problematico):
 
 
 def test_math_inline_and_display(tmp=None):
-    """Le formule $...$ e $$...$$ diventano SVG; nessun '$' resta nel PDF."""
+    """The $...$ and $$...$$ formulas become SVGs; no '$' remains in the PDF."""
     import tempfile
     d = Path(tempfile.mkdtemp())
     src = d / "math.md"
@@ -153,18 +153,18 @@ def test_math_inline_and_display(tmp=None):
     out = d / "math.pdf"
     res = convert(src, out, {"overwrite": True}, logger=log)
 
-    assert res.ok and out.exists(), f"conversione math fallita: {res.note}"
-    assert res.dst_metadata.get("n_math", 0) >= 4, "formule non individuate"
+    assert res.ok and out.exists(), f"math conversion failed: {res.note}"
+    assert res.dst_metadata.get("n_math", 0) >= 4, "formulas not found"
     assert res.dst_metadata.get("n_math_failed", 0) == 0, \
-        f"formule fallite: {res.dst_metadata.get('math_failures')}"
-    # nessun delimitatore '$' deve sopravvivere nel testo del PDF
-    assert "$" not in res.dst_metadata.get("pdf_text", ""), "delimitatori $ rimasti nel PDF"
+        f"failed formulas: {res.dst_metadata.get('math_failures')}"
+    # no '$' delimiter must survive in the PDF text
+    assert "$" not in res.dst_metadata.get("pdf_text", ""), "$ delimiters left in the PDF"
     import shutil
     shutil.rmtree(d, ignore_errors=True)
 
 
 def test_strict_math_blocks_on_failure():
-    """Con strict_math una formula non renderizzabile fa rifiutare il PDF."""
+    """With strict_math a formula that cannot be rendered makes the PDF rejected."""
     import tempfile
     d = Path(tempfile.mkdtemp())
     src = d / "bad.md"
@@ -172,10 +172,10 @@ def test_strict_math_blocks_on_failure():
     out = d / "bad.pdf"
     try:
         res = convert(src, out, {"overwrite": True, "strict_math": True}, logger=log)
-        assert not res.ok, "strict_math non ha bloccato la formula rotta"
-        assert not out.exists(), "PDF salvato nonostante strict_math"
+        assert not res.ok, "strict_math did not block the broken formula"
+        assert not out.exists(), "PDF saved despite strict_math"
         assert any(i.code == "math_render_failed" for i in res.errors), \
-            f"errore math atteso, ottenuti {[i.code for i in res.errors]}"
+            f"expected a math error, got {[i.code for i in res.errors]}"
     finally:
         import shutil
         shutil.rmtree(d, ignore_errors=True)
@@ -184,15 +184,15 @@ def test_strict_math_blocks_on_failure():
 # --------------------------------------------------------------------------- runner
 def _run_all() -> int:
     tests = [
-        ("MD->PDF leggibile (positivo)", test_md_to_pdf_readable),
-        ("Gatekeeper blocca output corrotto", test_gatekeeper_blocks_bad_output),
-        ("Matematica inline + display (no $ residui)", test_math_inline_and_display),
-        ("strict_math blocca formula rotta", test_strict_math_blocks_on_failure),
-        ("Validator MD: titolo mancante", test_md_validator_detects_missing_heading),
-        ("Validator PDF: testo troppo corto", test_pdf_validator_detects_short_text),
+        ("Readable MD->PDF (positive)", test_md_to_pdf_readable),
+        ("Gatekeeper blocks corrupted output", test_gatekeeper_blocks_bad_output),
+        ("Inline + display math (no leftover $)", test_math_inline_and_display),
+        ("strict_math blocks a broken formula", test_strict_math_blocks_on_failure),
+        ("MD validator: missing heading", test_md_validator_detects_missing_heading),
+        ("PDF validator: text too short", test_pdf_validator_detects_short_text),
     ]
     print("=" * 70)
-    print("tomdclaude — suite di test MD->PDF")
+    print("tomdclaude — MD->PDF test suite")
     print("=" * 70)
     failed = 0
     pdf_path = None
@@ -209,9 +209,9 @@ def _run_all() -> int:
             failed += 1
             print(f"[ERR ] {nome}\n       {type(e).__name__}: {e}")
     print("-" * 70)
-    print(f"Risultato: {len(tests) - failed}/{len(tests)} test superati.")
+    print(f"Result: {len(tests) - failed}/{len(tests)} tests passed.")
     if pdf_path and Path(pdf_path).exists():
-        print(f"PDF di esempio generato: {pdf_path}")
+        print(f"Example PDF generated: {pdf_path}")
     print("=" * 70)
     return 1 if failed else 0
 

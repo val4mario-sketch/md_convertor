@@ -1,12 +1,12 @@
-"""Validatore del rendering matematico.
+"""Math rendering validator.
 
-Verifica quante formule non sono state renderizzate. Di default e' un avviso
-(non bloccante): una singola formula esotica non deve impedire il salvataggio di
-un documento di decine di pagine; le formule fallite restano comunque visibili
-nel PDF come testo grezzo evidenziato e finiscono nel log.
+Checks how many formulas were not rendered. By default it is a warning
+(not blocking): a single exotic formula must not stop a document of
+dozens of pages from being saved; failed formulas stay visible
+in the PDF as highlighted raw text and go into the log.
 
-Con ``opts['strict_math'] = True`` il fallimento diventa bloccante (utile per i
-documenti in cui ogni formula deve essere perfetta).
+With ``opts['strict_math'] = True`` the failure becomes blocking (useful for
+documents in which every formula must be perfect).
 """
 from __future__ import annotations
 
@@ -27,5 +27,5 @@ class MathRenderValidator(Validator):
         total = dst_meta.get("n_math", "?")
         return [make(
             "math_render_failed",
-            f"{failed}/{total} formule non renderizzate (mostrate come testo grezzo).",
+            f"{failed}/{total} formulas not rendered (shown as raw text).",
             expected=0, actual=fails)]

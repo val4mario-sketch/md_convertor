@@ -1,16 +1,16 @@
 @echo off
 REM ============================================================
-REM  PROVA dell'OCR IA locale: trascina un PDF su questo file.
-REM  Converte solo alcune pagine con ENTRAMBI i motori e scrive
-REM     <nome>_prova_paddle.md   e   <nome>_prova_chandra.md
-REM  accanto al PDF (NON tocca altri .md). Alla fine stampa i tempi.
+REM  TEST of the local AI OCR: drag a PDF onto this file.
+REM  Converts only some pages with BOTH engines and writes
+REM     <name>_prova_paddle.md   and   <name>_prova_chandra.md
+REM  next to the PDF (does NOT touch other .md files). Prints the times at the end.
 REM ============================================================
 cd /d "%~dp0"
-title Prova OCR IA locale
+title Local AI OCR test
 set "PYEXE=%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
 if not exist "%PYEXE%" set "PYEXE=python"
 if "%~1"=="" (
-  echo Trascina un PDF sopra questo file .bat
+  echo Drag a PDF onto this .bat file
   pause
   exit /b 1
 )
@@ -18,5 +18,5 @@ set "PAGINE=1-3"
 set /p PAGINE=Quali pagine provo? (invio = 1-3, es. 12,115,381,400): 
 "%PYEXE%" ocr_vlm.py prova "%~1" --pages %PAGINE% --engine tutti
 echo.
-echo Log del motore in: %~dp0logs
+echo Engine log in: %~dp0logs
 pause

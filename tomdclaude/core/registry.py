@@ -1,7 +1,7 @@
-"""Registro centrale dei convertitori disponibili.
+"""Central registry of the available converters.
 
-Per aggiungere un nuovo convertitore basta importarlo e inserirlo in ``_CONVERTERS``.
-L'ordine conta solo in caso di sovrapposizione di formati (vince il primo).
+To add a new converter, just import it and put it in ``_CONVERTERS``.
+The order only matters when formats overlap (the first wins).
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def all_converters() -> list[type[BaseConverter]]:
 
 
 def targets_for(src_ext: str) -> list[str]:
-    """Formati di destinazione raggiungibili da una data estensione sorgente."""
+    """Target formats reachable from a given source extension."""
     s = norm_ext(src_ext)
     out: set[str] = set()
     for cls in _CONVERTERS:

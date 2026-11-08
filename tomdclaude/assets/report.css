@@ -4,7 +4,7 @@
    numerazione automatica dei capitoli, intestazioni/pie' di pagina.
    ========================================================================== */
 
-/* ---- Pagina e cornice di stampa ---- */
+/* ---- Page and print frame ---- */
 @page {
     size: A4;
     margin: 22mm 20mm 20mm 20mm;
@@ -22,13 +22,13 @@
     }
 }
 
-/* La copertina non ha intestazione ne' numero di pagina. */
+/* The cover has no header or page number. */
 @page :first {
     @top-center { content: none; }
     @bottom-center { content: none; }
 }
 
-/* ---- Base tipografica ---- */
+/* ---- Typographic base ---- */
 html {
     font-size: 11pt;
 }
@@ -67,7 +67,7 @@ p {
     margin: 0.2em 0;
     padding: 0;
 }
-.cover .doc-title::before { content: none; }  /* niente numerazione sul titolo */
+.cover .doc-title::before { content: none; }  /* no numbering on the title */
 .cover .doc-author {
     font-size: 13pt;
     color: #44505c;
@@ -78,7 +78,7 @@ p {
     color: #6b7681;
 }
 
-/* ---- Indice (TOC) ---- */
+/* ---- Table of contents ---- */
 nav.toc {
     page-break-after: always;
 }
@@ -107,14 +107,14 @@ nav.toc a {
     text-decoration: none;
     color: #1f2328;
 }
-/* Numero di pagina allineato a destra con puntini di guida. */
+/* Page number aligned right with leader dots. */
 nav.toc a::after {
     content: target-counter(attr(href url), page);
     float: right;
     color: #6b7681;
 }
 
-/* ---- Contenuto: titoli con numerazione automatica ---- */
+/* ---- Content: headings with automatic numbering ---- */
 .content h1, .content h2, .content h3,
 .content h4, .content h5, .content h6 {
     font-family: "Segoe UI Semibold", "Helvetica Neue", Arial, sans-serif;
@@ -130,7 +130,7 @@ nav.toc a::after {
     counter-reset: h2;
     page-break-before: always;
 }
-/* Il primo capitolo non forza un salto pagina extra dopo l'indice. */
+/* The first chapter does not force an extra page break after the contents. */
 .content > h1:first-child {
     page-break-before: avoid;
 }
@@ -218,7 +218,7 @@ nav.toc a::after {
 }
 .codehilite pre { border: none; margin: 0; background: none; }
 
-/* ---- Tabelle ---- */
+/* ---- Tables ---- */
 .content table {
     border-collapse: collapse;
     width: 100%;
@@ -248,9 +248,9 @@ nav.toc a::after {
     height: auto;
 }
 
-/* ---- Matematica (SVG renderizzati da matplotlib) ---- */
+/* ---- Math (SVGs rendered by matplotlib) ---- */
 .content img.math-inline {
-    /* width/height/vertical-align impostati inline per ogni formula */
+    /* width/height/vertical-align set inline for each formula */
     max-width: 100%;
 }
 .content .math-block-wrap {
@@ -298,7 +298,7 @@ nav.toc a::after {
 /* ---- Link ---- */
 .content a { color: #1d6fb8; text-decoration: none; }
 
-/* ---- Linea orizzontale ---- */
+/* ---- Horizontal rule ---- */
 .content hr {
     border: none;
     border-top: 1px solid #d4dade;

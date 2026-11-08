@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-convert_office_pdf.py — Modulo di conversione Office/PDF tramite LibreOffice
-headless (`soffice --headless --convert-to ...`).
+convert_office_pdf.py — Office/PDF conversion module using headless LibreOffice
+(`soffice --headless --convert-to ...`).
 
-Espone l'API uniforme richiesta dal convertitore universale:
+Exposes the uniform API required by the universal converter:
 
     convert(src: Path, dst: Path, opts: dict | None = None) -> dict
-        ritorna {'ok': bool, 'note': str, 'elapsed': float}
-        Non solleva eccezioni prevedibili. Se `soffice` non è installato,
-        ok=False con un messaggio che spiega come installarlo.
+        returns {'ok': bool, 'note': str, 'elapsed': float}
+        Raises no predictable exceptions. If `soffice` is not installed,
+        ok=False with a message explaining how to install it.
 
-    SUPPORTED_INPUTS  : frozenset di estensioni accettate
-    SUPPORTED_OUTPUTS : frozenset di estensioni producibili
+    SUPPORTED_INPUTS  : frozenset of accepted extensions
+    SUPPORTED_OUTPUTS : frozenset of producible extensions
     supports(src_ext, dst_ext) -> bool
 
-Strategia:
-  - Localizza `soffice` (PATH oppure `C:\\Program Files\\LibreOffice\\program\\soffice.exe`,
-    anche x86, oppure su Linux/macOS).
-  - Lancia `soffice --headless --convert-to <ext[:filter]> --outdir <tmpdir> <src>`
-    con `subprocess.run`, poi sposta/rinomina il file prodotto in `dst`.
-  - I PDF in input verso .docx/.html/.odt usano il filter `writer_pdf_import`
+Strategy:
+  - Locates `soffice` (PATH or `C:\\Program Files\\LibreOffice\\program\\soffice.exe`,
+    x86 too, or on Linux/macOS).
+  - Runs `soffice --headless --convert-to <ext[:filter]> --outdir <tmpdir> <src>`
+    with `subprocess.run`, then moves/renames the produced file to `dst`.
+  - Input PDFs to .docx/.html/.odt use the `writer_pdf_import` filter
     (LibreOffice 7+).
 """
 
@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Iterable
 
 # ---------------------------------------------------------------------------
-# Estensioni supportate
+# Supported extensions
 # ---------------------------------------------------------------------------
 
 SUPPORTED_INPUTS = frozenset({
@@ -51,18 +51,18 @@ SUPPORTED_OUTPUTS = frozenset({
     ".xlsx", ".csv", ".pptx",
 })
 
-# Categorie per validare la coppia src->dst
+# Categories for validating the src->dst pair
 _WORD_LIKE  = {".docx", ".doc", ".odt", ".rtf"}
 _CALC_LIKE  = {".xlsx", ".xls", ".ods"}
 _IMPRESS    = {".pptx", ".ppt", ".odp"}
 _PDF        = {".pdf"}
 
-# Output che hanno senso a partire da ogni categoria.
-# (LibreOffice può produrre PDF da tutto; gli altri richiedono coerenza tipo).
+# Outputs that make sense for each category.
+# (LibreOffice can produce PDF from anything; the others need matching types.)
 _WORD_OUT   = {".pdf", ".docx", ".odt", ".html", ".txt", ".rtf"}
 _CALC_OUT   = {".pdf", ".xlsx", ".ods", ".csv", ".html"}
 _IMPRESS_OUT = {".pdf", ".pptx", ".odp", ".html"}
-# PDF in input: il filter writer_pdf_import lo importa come documento testo.
+# Input PDF: the writer_pdf_import filter imports it as a text document.
 _PDF_OUT    = {".docx", ".odt", ".html", ".txt"}
 
 
@@ -80,7 +80,7 @@ def _category_outputs(src_ext: str) -> set[str]:
 
 
 def supports(src_ext: str, dst_ext: str) -> bool:
-    """True se questo modulo può convertire src_ext -> dst_ext."""
+    """True if this module can convert src_ext -> dst_ext."""
     se = src_ext.lower()
     de = dst_ext.lower()
     if not se.startswith("."):
@@ -93,11 +93,11 @@ def supports(src_ext: str, dst_ext: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Localizzazione del binario soffice
+# Locating the soffice binary
 # ---------------------------------------------------------------------------
 
 def _candidate_soffice_paths() -> Iterable[str]:
-    # Variabile esplicita ha la precedenza
+    # An explicit variable takes precedence
     env = os.environ.get("SOFFICE_BIN") or os.environ.get("LIBREOFFICE_BIN")
     if env:
         yield env
@@ -108,7 +108,7 @@ def _candidate_soffice_paths() -> Iterable[str]:
         if found:
             yield found
 
-    # Percorsi tipici Windows
+    # Typical Windows paths
     yield r"C:\Program Files\LibreOffice\program\soffice.exe"
     yield r"C:\Program Files\LibreOffice\program\soffice.com"
     yield r"C:\Program Files (x86)\LibreOffice\program\soffice.exe"
@@ -117,7 +117,7 @@ def _candidate_soffice_paths() -> Iterable[str]:
     # macOS
     yield "/Applications/LibreOffice.app/Contents/MacOS/soffice"
 
-    # Linux usuali
+    # Usual Linux paths
     yield "/usr/bin/soffice"
     yield "/usr/local/bin/soffice"
 
@@ -130,35 +130,35 @@ def _find_soffice() -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Mappa estensione di output -> argomento `--convert-to` di LibreOffice
+# Maps the output extension to the LibreOffice `--convert-to` argument
 # ---------------------------------------------------------------------------
 
-# Filtri specifici quando serve forzare il formato (es. xlsx->csv UTF-8, PDF in).
+# Specific filters when the format must be forced (e.g. xlsx->csv UTF-8, PDF in).
 def _convert_to_arg(src_ext: str, dst_ext: str) -> str:
     se = src_ext.lower()
     de = dst_ext.lower()
 
-    # CSV: usa il filter "csv" con tokens (44=, 34=", 76=UTF-8)
+    # CSV: use the "csv" filter with tokens (44=, 34=", 76=UTF-8)
     if de == ".csv":
         return "csv:Text - txt - csv (StarCalc):44,34,76,1,,0"
 
-    # HTML da Calc / Impress / Writer: usa filter dedicato se serve
+    # HTML from Calc / Impress / Writer: use a dedicated filter if needed
     if de == ".html":
         if se in _CALC_LIKE:
             return "html:HTML (StarCalc)"
         if se in _IMPRESS:
             return "html:impress_html_Export"
-        # writer e pdf->html
+        # writer and pdf->html
         return "html:HTML (StarWriter)"
 
-    # TXT: testo Writer
+    # TXT: Writer text
     if de == ".txt":
         return "txt:Text"
 
-    # ODT/DOCX/RTF da PDF: il target usa il normale filtro di export Writer.
-    # ATTENZIONE: il `--convert-to` indica solo il FORMATO DI USCITA. Per l'INGRESSO
-    # bisogna forzare il filtro `writer_pdf_import` (vedi `_infilter_arg`), altrimenti
-    # LibreOffice apre il PDF in Draw e il salvataggio come .docx fallisce con
+    # ODT/DOCX/RTF from PDF: the target uses the normal Writer export filter.
+    # WARNING: `--convert-to` only states the OUTPUT FORMAT. For the INPUT
+    # the `writer_pdf_import` filter must be forced (see `_infilter_arg`), otherwise
+    # LibreOffice opens the PDF in Draw and saving as .docx fails with
     # "SfxBaseModel::impl_store ... failed".
     if se == ".pdf" and de in {".docx", ".odt", ".rtf"}:
         if de == ".docx":
@@ -168,31 +168,31 @@ def _convert_to_arg(src_ext: str, dst_ext: str) -> str:
         if de == ".rtf":
             return "rtf"
 
-    # PPTX da .ppt/.odp
+    # PPTX from .ppt/.odp
     if de == ".pptx":
         return "pptx:Impress MS PowerPoint 2007 XML"
 
-    # XLSX da .xls/.ods
+    # XLSX from .xls/.ods
     if de == ".xlsx":
         return "xlsx:Calc MS Excel 2007 XML"
 
-    # DOCX da .doc/.odt/.rtf
+    # DOCX from .doc/.odt/.rtf
     if de == ".docx":
         return "docx:MS Word 2007 XML"
 
-    # ODT generico
+    # Generic ODT
     if de == ".odt":
         return "odt"
 
-    # ODP generico
+    # Generic ODP
     if de == ".odp":
         return "odp"
 
-    # ODS generico
+    # Generic ODS
     if de == ".ods":
         return "ods"
 
-    # PDF: lascia che LO scelga il filter giusto in base al sorgente
+    # PDF: let LO choose the right filter based on the source
     if de == ".pdf":
         return "pdf"
 
@@ -200,13 +200,13 @@ def _convert_to_arg(src_ext: str, dst_ext: str) -> str:
 
 
 def _infilter_arg(src_ext: str, dst_ext: str) -> str | None:
-    """Filtro di IMPORT da forzare con `--infilter`.
+    """IMPORT filter to force with `--infilter`.
 
-    Necessario per i PDF: se non si forza `writer_pdf_import`, LibreOffice apre
-    il PDF in Draw (l'associazione predefinita per i .pdf) e il salvataggio verso
-    un formato Writer (.docx/.odt/.rtf/.txt/.html) fallisce con
+    Needed for PDFs: unless `writer_pdf_import` is forced, LibreOffice opens
+    the PDF in Draw (the default association for .pdf) and saving to
+    a Writer format (.docx/.odt/.rtf/.txt/.html) fails with
     "SfxBaseModel::impl_store ... failed (Error Area:Io Class:Write)".
-    Forzando il filtro, il PDF viene aperto come documento Writer e l'export riesce.
+    With the filter forced, the PDF opens as a Writer document and the export succeeds.
     """
     if src_ext.lower() == ".pdf":
         return "writer_pdf_import"
@@ -219,14 +219,14 @@ def _list_alternatives(src_ext: str) -> list[str]:
 
 
 def _pdf_to_txt_pymupdf(src: Path, dst: Path, t0: float) -> dict | None:
-    """Estrae testo semplice da un PDF con PyMuPDF (fitz).
+    """Extracts plain text from a PDF with PyMuPDF (fitz).
 
-    Serve perché LibreOffice, importando il PDF in Writer, mette il testo in
-    caselle posizionate che il filtro `txt:Text` NON esporta: il risultato
-    sarebbe un .txt quasi vuoto. PyMuPDF estrae il vero livello testo del PDF.
+    Needed because LibreOffice, when importing the PDF into Writer, places text in
+    positioned boxes that the `txt:Text` filter does NOT export: the result
+    would be an almost empty .txt. PyMuPDF extracts the PDF's real text layer.
 
-    Ritorna un dict risultato se ha prodotto testo, `None` se PyMuPDF non è
-    disponibile o il PDF non ha testo estraibile (così si ricade su LibreOffice).
+    Returns a result dict if it produced text, `None` if PyMuPDF is not
+    available or the PDF has no extractable text (so it falls back to LibreOffice).
     """
     try:
         import fitz  # PyMuPDF
@@ -239,14 +239,14 @@ def _pdf_to_txt_pymupdf(src: Path, dst: Path, t0: float) -> dict | None:
                 parts.append(page.get_text("text"))
         text = "\n".join(parts).strip()
         if not text:
-            return None  # PDF scansionato/immagine: lascia provare LibreOffice
+            return None  # Scanned PDF/image: let LibreOffice try
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(text + "\n", encoding="utf-8")
         return {"ok": True,
-                "note": f"convertito .pdf -> .txt via PyMuPDF ({len(text)} caratteri)",
+                "note": f"converted .pdf -> .txt via PyMuPDF ({len(text)} caratteri)",
                 "elapsed": time.perf_counter() - t0}
     except Exception:
-        return None  # in caso di problemi, fallback a LibreOffice
+        return None  # if anything goes wrong, fall back to LibreOffice
 
 
 # ---------------------------------------------------------------------------
@@ -254,19 +254,19 @@ def _pdf_to_txt_pymupdf(src: Path, dst: Path, t0: float) -> dict | None:
 # ---------------------------------------------------------------------------
 
 INSTALL_HINT = (
-    "LibreOffice non e' installato o `soffice` non e' raggiungibile. "
-    "Installalo con: winget install --id TheDocumentFoundation.LibreOffice -e "
-    "(oppure scaricalo da https://www.libreoffice.org). "
-    "In alternativa imposta la variabile d'ambiente SOFFICE_BIN con il percorso completo."
+    "LibreOffice is not installed or `soffice` cannot be reached. "
+    "Install it with: winget install --id TheDocumentFoundation.LibreOffice -e "
+    "(or download it from https://www.libreoffice.org). "
+    "Alternatively set the SOFFICE_BIN environment variable to the full path."
 )
 
 
 def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
-    """Converte `src` -> `dst` tramite LibreOffice headless.
+    """Converts `src` -> `dst` using headless LibreOffice.
 
-    Ritorna sempre un dict {'ok': bool, 'note': str, 'elapsed': float}.
-    Non solleva eccezioni prevedibili (FileNotFoundError, subprocess errors,
-    timeouts, ecc.): vengono catturate e riportate in 'note'.
+    Always returns a dict {'ok': bool, 'note': str, 'elapsed': float}.
+    Raises no predictable exceptions (FileNotFoundError, subprocess errors,
+    timeouts, etc.): they are caught and reported in 'note'.
     """
     t0 = time.perf_counter()
     opts = opts or {}
@@ -274,37 +274,37 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
     try:
         src = Path(src)
         dst = Path(dst)
-    except Exception as ex:  # pragma: no cover - difensivo
-        return {"ok": False, "note": f"path non valido: {ex}", "elapsed": 0.0}
+    except Exception as ex:  # pragma: no cover - defensive
+        return {"ok": False, "note": f"invalid path: {ex}", "elapsed": 0.0}
 
     se = src.suffix.lower()
     de = dst.suffix.lower()
 
     if not src.exists():
-        return {"ok": False, "note": f"file sorgente non trovato: {src}",
+        return {"ok": False, "note": f"source file not found: {src}",
                 "elapsed": time.perf_counter() - t0}
 
     if se not in SUPPORTED_INPUTS:
         return {"ok": False,
-                "note": f"estensione di input '{se}' non supportata da questo modulo. "
+                "note": f"input extension '{se}' not supported by this module. "
                         f"Supportate: {sorted(SUPPORTED_INPUTS)}",
                 "elapsed": time.perf_counter() - t0}
 
     if de not in SUPPORTED_OUTPUTS:
         return {"ok": False,
-                "note": f"estensione di output '{de}' non supportata da questo modulo. "
+                "note": f"output extension '{de}' not supported by this module. "
                         f"Supportate: {sorted(SUPPORTED_OUTPUTS)}",
                 "elapsed": time.perf_counter() - t0}
 
     if not supports(se, de):
         alt = _list_alternatives(se)
         return {"ok": False,
-                "note": (f"conversione {se} -> {de} non supportata. "
-                         f"Alternative per {se}: {alt}"),
+                "note": (f"conversione {se} -> {de} not supported. "
+                         f"Alternatives for {se}: {alt}"),
                 "elapsed": time.perf_counter() - t0}
 
-    # PDF -> TXT: usa PyMuPDF (testo reale). Se il PDF non ha testo estraibile
-    # (scansione) o PyMuPDF manca, si prosegue con LibreOffice qui sotto.
+    # PDF -> TXT: use PyMuPDF (real text). If the PDF has no extractable text
+    # (scan) or PyMuPDF is missing, continue with LibreOffice below.
     if se == ".pdf" and de == ".txt":
         r = _pdf_to_txt_pymupdf(src, dst, t0)
         if r is not None:
@@ -315,9 +315,9 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
         return {"ok": False, "note": INSTALL_HINT,
                 "elapsed": time.perf_counter() - t0}
 
-    # XLSX -> PDF: pre-processa il foglio con openpyxl per impostare
-    # "fit to width" e orientamento orizzontale (colonne larghe non tagliate).
-    # Lavora su una COPIA temporanea: il file originale resta intatto.
+    # XLSX -> PDF: pre-process the sheet with openpyxl to set
+    # "fit to width" and landscape orientation (wide columns not cut off).
+    # Works on a temporary COPY: the original file stays intact.
     fit_note = ""
     if se == ".xlsx" and de == ".pdf" and not opts.get("no_fit_page"):
         try:
@@ -329,15 +329,15 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             wb = load_workbook(str(_fit_tmp))
             for ws in wb.worksheets:
                 ws.page_setup.fitToWidth = 1
-                ws.page_setup.fitToHeight = 0          # altezza libera (piu' pagine)
+                ws.page_setup.fitToHeight = 0          # free height (several pages)
                 ws.sheet_properties.pageSetUpPr.fitToPage = True
-                # orizzontale se il foglio e' largo (> 7 colonne usate)
+                # landscape if the sheet is wide (> 7 columns used)
                 if ws.max_column and ws.max_column > 7:
                     ws.page_setup.orientation = "landscape"
-                # auto-larghezza colonne: niente testo clippato in stampa
+                # automatic column widths: no text clipped when printing
                 for col_idx in range(1, (ws.max_column or 0) + 1):
                     letter = get_column_letter(col_idx)
-                    if ws.column_dimensions[letter].width:   # gia' impostata a mano
+                    if ws.column_dimensions[letter].width:   # already set by hand
                         continue
                     longest = 0
                     for row in ws.iter_rows(min_col=col_idx, max_col=col_idx,
@@ -348,17 +348,17 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
                     if longest:
                         ws.column_dimensions[letter].width = min(longest + 2, 60)
             wb.save(str(_fit_tmp))
-            src = _fit_tmp                              # converti la copia
-            fit_note = " (fit-to-width applicato)"
+            src = _fit_tmp                              # convert the copy
+            fit_note = " (fit-to-width applied)"
         except Exception:
-            pass  # se il preprocess fallisce, si converte l'originale com'e'
+            pass  # if the preprocessing fails, the original is converted as it is
 
-    # Prepara cartella di output temporanea, così possiamo prendere il file
-    # generato da LibreOffice (che usa il nome di src + nuova estensione).
+    # Prepare a temporary output folder, so we can pick up the file
+    # generated by LibreOffice (which uses the src name + new extension).
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
     except Exception as ex:
-        return {"ok": False, "note": f"impossibile creare cartella di destinazione: {ex}",
+        return {"ok": False, "note": f"cannot create the destination folder: {ex}",
                 "elapsed": time.perf_counter() - t0}
 
     timeout = float(opts.get("timeout", 180))
@@ -368,8 +368,8 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
     with tempfile.TemporaryDirectory(prefix="lo_conv_") as tmp:
         tmpdir = Path(tmp)
 
-        # Usa un profilo utente isolato così non interferisce con eventuali
-        # istanze di LibreOffice aperte dall'utente.
+        # Use an isolated user profile so it does not interfere with any
+        # LibreOffice instances opened by the user.
         user_profile = tmpdir / "lo_profile"
         user_profile_uri = user_profile.as_uri()
 
@@ -381,7 +381,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             "--norestore",
             f"-env:UserInstallation={user_profile_uri}",
         ]
-        # Forza il filtro di import quando serve (indispensabile per i PDF).
+        # Force the import filter when needed (essential for PDFs).
         if infilter:
             cmd.append(f"--infilter={infilter}")
         cmd += [
@@ -403,17 +403,17 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
                     "elapsed": time.perf_counter() - t0}
         except subprocess.TimeoutExpired:
             return {"ok": False,
-                    "note": f"timeout ({timeout:.0f}s) durante la conversione con soffice",
+                    "note": f"timeout ({timeout:.0f}s) during the conversion with soffice",
                     "elapsed": time.perf_counter() - t0}
         except Exception as ex:
-            return {"ok": False, "note": f"errore eseguendo soffice: {ex}",
+            return {"ok": False, "note": f"error running soffice: {ex}",
                     "elapsed": time.perf_counter() - t0}
 
-        # LibreOffice nomina l'output come <stem(src)><.de> nella outdir
+        # LibreOffice names the output <stem(src)><.de> in the outdir
         produced = tmpdir / (src.stem + de)
         if not produced.exists():
-            # Talvolta LO produce un nome leggermente diverso (es. con filtri
-            # particolari). Prendi il primo file con l'estensione richiesta.
+            # Sometimes LO produces a slightly different name (e.g. with special
+            # filters). Take the first file with the requested extension.
             candidates = list(tmpdir.glob(f"*{de}"))
             if candidates:
                 produced = candidates[0]
@@ -421,21 +421,21 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
         if not produced.exists():
             stderr = (proc.stderr or "").strip()
             stdout = (proc.stdout or "").strip()
-            tail = (stderr or stdout or "nessun output da soffice").splitlines()
+            tail = (stderr or stdout or "no output from soffice").splitlines()
             tail_txt = " | ".join(tail[-3:])
             return {"ok": False,
-                    "note": (f"soffice non ha prodotto il file atteso "
+                    "note": (f"soffice did not produce the expected file "
                              f"(rc={proc.returncode}). {tail_txt}"),
                     "elapsed": time.perf_counter() - t0}
 
-        # Sposta/rinomina in dst (sovrascrivendo se esiste)
+        # Move/rename to dst (overwriting if it exists)
         try:
             if dst.exists():
                 dst.unlink()
             shutil.move(str(produced), str(dst))
         except Exception as ex:
             return {"ok": False,
-                    "note": f"impossibile spostare l'output in {dst}: {ex}",
+                    "note": f"cannot move the output to {dst}: {ex}",
                     "elapsed": time.perf_counter() - t0}
 
     elapsed = time.perf_counter() - t0
@@ -445,7 +445,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# CLI minimale per uso diretto / debug
+# Minimal CLI for direct use / debugging
 # ---------------------------------------------------------------------------
 
 def _main(argv: list[str]) -> int:

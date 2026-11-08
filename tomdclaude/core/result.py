@@ -1,7 +1,7 @@
-"""Tipi di ritorno condivisi: ValidationIssue e ConversionResult.
+"""Shared return types: ValidationIssue and ConversionResult.
 
-Sono dataclass semplici cosi' che CLI, GUI e test possano ispezionare l'esito di
-una conversione in modo uniforme (niente eccezioni per i casi prevedibili).
+They are simple dataclasses so CLI, GUI and tests can inspect the outcome of
+a conversion in a uniform way (no exceptions for predictable cases).
 """
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ from typing import Any, Optional
 
 @dataclass
 class ValidationIssue:
-    """Un singolo rilievo prodotto da un validatore.
+    """A single finding produced by a validator.
 
-    level: "error"  -> BLOCCANTE: la conversione viene rifiutata, il file non
-                       viene salvato.
-           "warning" -> non bloccante: il file viene salvato ma il problema
-                       viene segnalato/loggato.
+    level: "error"  -> BLOCKING: the conversion is rejected, the file is not
+                       saved.
+           "warning" -> not blocking: the file is saved but the problem
+                       is flagged/logged.
     """
 
     level: str
@@ -39,7 +39,7 @@ class ValidationIssue:
 
 @dataclass
 class ConversionResult:
-    """Esito completo di una conversione, restituito dalla pipeline."""
+    """Complete outcome of a conversion, returned by the pipeline."""
 
     ok: bool
     src: Path
@@ -47,7 +47,7 @@ class ConversionResult:
     converter: str = ""
     note: str = ""
     elapsed: float = 0.0
-    committed: bool = False  # True solo se il file finale e' stato effettivamente scritto
+    committed: bool = False  # True only if the final file was actually written
     src_metadata: dict = field(default_factory=dict)
     dst_metadata: dict = field(default_factory=dict)
     issues: list[ValidationIssue] = field(default_factory=list)

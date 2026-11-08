@@ -1,17 +1,17 @@
-"""Validatore della struttura gerarchica Markdown.
+"""Markdown heading hierarchy validator.
 
-Confronta i titoli del Markdown sorgente con quelli effettivamente renderizzati
-e verifica che nessun titolo sia stato perso nel PDF finale.
+Compares the headings of the source Markdown with those actually rendered
+and checks that no heading was lost in the final PDF.
 
-Rilievi:
-  - heading_structure_mismatch (ERROR): la sequenza dei LIVELLI dei titoli
-    sorgente non coincide con quella renderizzata -> un titolo e' stato
-    aggiunto/perso o la gerarchia e' cambiata.
-  - heading_missing_in_pdf  (ERROR): il testo di un titolo non compare nel
-    testo estraibile del PDF -> titolo perso in fase di render.
-  - heading_text_changed    (WARNING): il testo di un titolo e' cambiato (es.
-    per la tipografia "smart"); la gerarchia e' intatta.
-  - table_count_lower       (WARNING): meno tabelle nel rendering che nel sorgente.
+Findings:
+  - heading_structure_mismatch (ERROR): the sequence of source heading LEVELS
+    does not match the rendered one -> a heading was
+    added/lost or the hierarchy changed.
+  - heading_missing_in_pdf  (ERROR): the text of a heading does not appear in the
+    extractable PDF text -> heading lost during rendering.
+  - heading_text_changed    (WARNING): the text of a heading changed (e.g.
+    through "smart" typography); the hierarchy is intact.
+  - table_count_lower       (WARNING): fewer tables in the rendering than in the source.
 """
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ class MarkdownStructureValidator(Validator):
     def validate(self, src_meta, dst_meta, ctx) -> list[ValidationIssue]:
         issues: list[ValidationIssue] = []
 
-        src_h = src_meta.get("headings", []) or []          # [(livello, testo)]
-        dst_h = dst_meta.get("html_headings", []) or []      # [(livello, testo)]
+        src_h = src_meta.get("headings", []) or []          # [(level, text)]
+        dst_h = dst_meta.get("html_headings", []) or []      # [(level, text)]
 
         src_levels = [lvl for lvl, _ in src_h]
         dst_levels = [lvl for lvl, _ in dst_h]
@@ -35,18 +35,18 @@ class MarkdownStructureValidator(Validator):
         if src_levels != dst_levels:
             issues.append(self.error(
                 "heading_structure_mismatch",
-                "La struttura gerarchica dei titoli non e' stata preservata.",
+                "The heading hierarchy was not preserved.",
                 expected=src_levels, actual=dst_levels))
         else:
-            # gerarchia ok: controlla eventuali variazioni di testo (non bloccanti)
+            # hierarchy ok: check any text variations (not blocking)
             for (_, st), (_, dt) in zip(src_h, dst_h):
                 if normalize_text(st) != normalize_text(dt):
                     issues.append(self.warn(
                         "heading_text_changed",
-                        "Testo di un titolo modificato dal rendering.",
+                        "Heading text changed by the rendering.",
                         expected=st, actual=dt))
 
-        # Verifica sul PRODOTTO FINALE: ogni titolo deve comparire nel testo PDF.
+        # Check on the FINAL PRODUCT: each heading must appear in the PDF text.
         pdf_text = normalize_text(dst_meta.get("pdf_text", "") or dst_meta.get("text", ""))
         if pdf_text:
             missing = [st for _, st in src_h
@@ -54,16 +54,16 @@ class MarkdownStructureValidator(Validator):
             if missing:
                 issues.append(self.error(
                     "heading_missing_in_pdf",
-                    "Uno o piu' titoli non compaiono nel PDF prodotto.",
+                    "One or more headings do not appear in the produced PDF.",
                     actual=missing))
 
-        # Tabelle: segnalazione non bloccante (il riconoscimento MD e' euristico).
+        # Tables: not blocking (MD recognition is heuristic).
         ns = src_meta.get("n_tables", 0)
         nd = dst_meta.get("n_html_tables", 0)
         if ns and nd < ns:
             issues.append(self.warn(
                 "table_count_lower",
-                "Renderizzate meno tabelle di quante presenti nel sorgente.",
+                "Fewer tables rendered than present in the source.",
                 expected=ns, actual=nd))
 
         return issues

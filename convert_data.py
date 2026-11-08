@@ -1,21 +1,21 @@
 """
 convert_data.py
 ----------------
-Modulo di conversione per dati tabellari.
+Conversion module for tabular data.
 
-Estensioni supportate in input : .csv .tsv .xlsx .xls .ods .json
-Estensioni supportate in output: .csv .tsv .xlsx .json .parquet
+Supported input extensions: .csv .tsv .xlsx .xls .ods .json
+Supported output extensions: .csv .tsv .xlsx .json .parquet
 
-Funzione principale:
+Main function:
     convert(src: Path, dst: Path, opts: dict | None = None) -> dict
 
-Ritorna sempre un dict con chiavi:
+Always returns a dict with the keys:
     ok      -> bool
-    note    -> str (messaggio informativo o di errore)
-    elapsed -> float (secondi)
+    note    -> str (information or error message)
+    elapsed -> float (seconds)
 
-Le eccezioni prevedibili vengono catturate e tradotte in ok=False con messaggio
-amichevole.
+Predictable exceptions are caught and turned into ok=False with a
+friendly message.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import pandas as pd
 
 
 # ---------------------------------------------------------------------------
-# Capacita' dichiarate
+# Declared capabilities
 # ---------------------------------------------------------------------------
 
 SUPPORTED_INPUTS: tuple[str, ...] = (
@@ -40,9 +40,9 @@ SUPPORTED_OUTPUTS: tuple[str, ...] = (
     ".csv", ".tsv", ".xlsx", ".json", ".parquet",
 )
 
-# Coppie (src_ext, dst_ext) effettivamente realizzate. Qualsiasi combinazione
-# fra gli input/output dichiarati e' in pratica gestibile passando sempre per
-# un DataFrame pandas, quindi popoliamo dinamicamente.
+# (src_ext, dst_ext) pairs actually implemented. Any combination
+# among the declared inputs/outputs is in practice manageable by always going through
+# a pandas DataFrame, so we populate it dynamically.
 _SUPPORTED_PAIRS: set[tuple[str, str]] = set()
 for _i in SUPPORTED_INPUTS:
     for _o in SUPPORTED_OUTPUTS:
@@ -50,10 +50,10 @@ for _i in SUPPORTED_INPUTS:
 
 
 def supports(src_ext: str, dst_ext: str) -> bool:
-    """Ritorna True se la coppia (src_ext, dst_ext) e' supportata.
+    """Returns True if the pair (src_ext, dst_ext) is supported.
 
-    Gli argomenti possono includere o meno il punto iniziale e qualunque
-    capitalizzazione.
+    The arguments may or may not include the leading dot, in any
+    capitalization.
     """
     s = _norm_ext(src_ext)
     d = _norm_ext(dst_ext)
@@ -83,13 +83,13 @@ def _read_csv_like(src: Path, sep: str, opts: dict) -> tuple[pd.DataFrame, str]:
 
 
 def _read_excel(src: Path, opts: dict) -> tuple[pd.DataFrame, str]:
-    """Legge xlsx/xls/ods. Per .ods serve odfpy."""
+    """Reads xlsx/xls/ods. .ods needs odfpy."""
     ext = src.suffix.lower()
     engine = None
     if ext == ".xlsx":
         engine = "openpyxl"
     elif ext == ".xls":
-        engine = "xlrd"  # potrebbe non essere installato
+        engine = "xlrd"  # may not be installed
     elif ext == ".ods":
         engine = "odf"
 
@@ -100,29 +100,29 @@ def _read_excel(src: Path, opts: dict) -> tuple[pd.DataFrame, str]:
         if sheet_req is not None:
             df = pd.read_excel(src, sheet_name=sheet_req, engine=engine)
         else:
-            # Leggi tutti i fogli per poter avvisare quanti ce ne sono.
+            # Read all the sheets to be able to report how many there are.
             sheets = pd.read_excel(src, sheet_name=None, engine=engine)
             if not sheets:
-                raise ValueError("Il file non contiene fogli leggibili.")
+                raise ValueError("The file contains no readable sheets.")
             first_name = next(iter(sheets))
             df = sheets[first_name]
             if len(sheets) > 1:
                 note_extra = (
-                    f"Foglio usato: '{first_name}'. Trovati {len(sheets)} fogli "
-                    f"totali; passare opts['sheet'] per sceglierne uno diverso."
+                    f"Sheet used: '{first_name}'. Trovati {len(sheets)} sheets "
+                    f"in total; pass opts['sheet'] to choose a different one."
                 )
             else:
-                note_extra = f"Foglio usato: '{first_name}'."
+                note_extra = f"Sheet used: '{first_name}'."
     except ImportError as e:
-        # Engine mancante
+        # Missing engine
         if ext == ".ods":
             raise RuntimeError(
-                "Per leggere file .ods serve 'odfpy'. Installa con: pip install odfpy"
+                "Reading .ods files needs 'odfpy'. Install with: pip install odfpy"
             ) from e
         if ext == ".xls":
             raise RuntimeError(
-                "Per leggere file .xls serve 'xlrd' (versione 1.2.0). "
-                "Installa con: pip install xlrd==1.2.0"
+                "Reading .xls files needs 'xlrd' (version 1.2.0). "
+                "Install with: pip install xlrd==1.2.0"
             ) from e
         raise
 
@@ -130,25 +130,25 @@ def _read_excel(src: Path, opts: dict) -> tuple[pd.DataFrame, str]:
 
 
 def _read_json(src: Path, opts: dict) -> tuple[pd.DataFrame, str]:
-    """Legge sia json 'lista di dict' sia 'dict di colonne'."""
+    """Reads both 'list of dicts' and 'dict of columns' JSON."""
     with open(src, "r", encoding="utf-8") as fh:
         raw = json.load(fh)
 
     if isinstance(raw, list):
         df = pd.DataFrame(raw)
-        note = "JSON letto come lista di record."
+        note = "JSON read as a list of records."
     elif isinstance(raw, dict):
-        # Distinguiamo: dict di colonne (valori = liste della stessa lunghezza)
-        # da un singolo record (valori scalari).
+        # Distinguish: dict of columns (values = lists of the same length)
+        # from a single record (scalar values).
         values = list(raw.values())
         if values and all(isinstance(v, list) for v in values):
             df = pd.DataFrame(raw)
-            note = "JSON letto come dict di colonne."
+            note = "JSON read as a dict of columns."
         else:
             df = pd.DataFrame([raw])
-            note = "JSON letto come singolo record."
+            note = "JSON read as a single record."
     else:
-        raise ValueError("Struttura JSON non riconosciuta: attesa lista o dict.")
+        raise ValueError("JSON structure not recognized: expected a list or a dict.")
 
     return df, note
 
@@ -165,7 +165,7 @@ def _read_any(src: Path, opts: dict) -> tuple[pd.DataFrame, str]:
         return _read_excel(src, opts)
     if ext == ".json":
         return _read_json(src, opts)
-    raise ValueError(f"Estensione di input non supportata: {ext}")
+    raise ValueError(f"Unsupported input extension: {ext}")
 
 
 # ---------------------------------------------------------------------------
@@ -179,52 +179,52 @@ def _write_any(df: pd.DataFrame, dst: Path, opts: dict) -> str:
     if ext == ".csv":
         sep = opts.get("sep") or ","
         df.to_csv(dst, sep=sep, index=False)
-        return f"Scritto CSV ({len(df)} righe)."
+        return f"Wrote CSV ({len(df)} rows)."
 
     if ext == ".tsv":
         df.to_csv(dst, sep="\t", index=False)
-        return f"Scritto TSV ({len(df)} righe)."
+        return f"Wrote TSV ({len(df)} rows)."
 
     if ext == ".xlsx":
         sheet_name = opts.get("sheet") or "Sheet1"
         df.to_excel(dst, index=False, sheet_name=sheet_name, engine="openpyxl")
-        return f"Scritto XLSX ({len(df)} righe, foglio '{sheet_name}')."
+        return f"Wrote XLSX ({len(df)} rows, sheet '{sheet_name}')."
 
     if ext == ".json":
         orient = opts.get("orient", "records")
         df.to_json(dst, orient=orient, force_ascii=False, indent=2)
-        return f"Scritto JSON orient='{orient}' ({len(df)} righe)."
+        return f"Wrote JSON orient='{orient}' ({len(df)} rows)."
 
     if ext == ".parquet":
         try:
             df.to_parquet(dst, index=False)
         except ImportError as e:
             raise RuntimeError(
-                "Per scrivere file .parquet serve 'pyarrow' o 'fastparquet'. "
-                "Installa con: pip install pyarrow"
+                "Writing .parquet files needs 'pyarrow' or 'fastparquet'. "
+                "Install with: pip install pyarrow"
             ) from e
         except ValueError as e:
-            # pandas alza ValueError se manca l'engine parquet
+            # pandas raises ValueError if the parquet engine is missing
             msg = str(e).lower()
             if "pyarrow" in msg or "fastparquet" in msg or "parquet" in msg:
                 raise RuntimeError(
-                    "Per scrivere file .parquet serve 'pyarrow' o 'fastparquet'. "
-                    "Installa con: pip install pyarrow"
+                    "Writing .parquet files needs 'pyarrow' or 'fastparquet'. "
+                    "Install with: pip install pyarrow"
                 ) from e
             raise
-        return f"Scritto Parquet ({len(df)} righe)."
+        return f"Wrote Parquet ({len(df)} rows)."
 
-    raise ValueError(f"Estensione di output non supportata: {ext}")
+    raise ValueError(f"Unsupported output extension: {ext}")
 
 
 # ---------------------------------------------------------------------------
-# API pubblica
+# Public API
 # ---------------------------------------------------------------------------
 
 def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
-    """Converte un file tabellare da src a dst.
+    """Converts a tabular file from src to dst.
 
-    Vedi modulo docstring per dettagli sulle estensioni supportate.
+    See the module docstring for details on the supported extensions.
     """
     t0 = time.perf_counter()
     opts = dict(opts or {})
@@ -236,7 +236,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
         if not src.exists():
             return {
                 "ok": False,
-                "note": f"File sorgente non trovato: {src}",
+                "note": f"Source file not found: {src}",
                 "elapsed": time.perf_counter() - t0,
             }
 
@@ -247,7 +247,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             return {
                 "ok": False,
                 "note": (
-                    f"Estensione di input '{src_ext}' non supportata. "
+                    f"Input extension '{src_ext}' not supported. "
                     f"Supportate: {', '.join(SUPPORTED_INPUTS)}."
                 ),
                 "elapsed": time.perf_counter() - t0,
@@ -257,7 +257,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             return {
                 "ok": False,
                 "note": (
-                    f"Estensione di output '{dst_ext}' non supportata. "
+                    f"Output extension '{dst_ext}' not supported. "
                     f"Supportate: {', '.join(SUPPORTED_OUTPUTS)}."
                 ),
                 "elapsed": time.perf_counter() - t0,
@@ -267,8 +267,8 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             return {
                 "ok": False,
                 "note": (
-                    f"Coppia {src_ext} -> {dst_ext} non supportata. "
-                    f"Prova un formato intermedio fra: "
+                    f"Coppia {src_ext} -> {dst_ext} not supported. "
+                    f"Try an intermediate format among: "
                     f"{', '.join(SUPPORTED_OUTPUTS)}."
                 ),
                 "elapsed": time.perf_counter() - t0,
@@ -278,7 +278,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
         try:
             df, read_note = _read_any(src, opts)
         except RuntimeError as e:
-            # Errori amichevoli (engine mancanti, ecc.)
+            # Friendly errors (missing engines, etc.)
             return {
                 "ok": False,
                 "note": str(e),
@@ -287,7 +287,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
         except Exception as e:
             return {
                 "ok": False,
-                "note": f"Errore durante la lettura di {src.name}: {e}",
+                "note": f"Error while reading {src.name}: {e}",
                 "elapsed": time.perf_counter() - t0,
             }
 
@@ -303,20 +303,20 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
         except Exception as e:
             return {
                 "ok": False,
-                "note": f"Errore durante la scrittura di {dst.name}: {e}",
+                "note": f"Error while writing {dst.name}: {e}",
                 "elapsed": time.perf_counter() - t0,
             }
 
         note_parts = [p for p in (read_note, write_note) if p]
         return {
             "ok": True,
-            "note": " ".join(note_parts) if note_parts else "Conversione riuscita.",
+            "note": " ".join(note_parts) if note_parts else "Conversion successful.",
             "elapsed": time.perf_counter() - t0,
         }
 
-    except Exception as e:  # rete di sicurezza
+    except Exception as e:  # safety net
         return {
             "ok": False,
-            "note": f"Errore imprevisto: {e}",
+            "note": f"Unexpected error: {e}",
             "elapsed": time.perf_counter() - t0,
         }

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-tomd2_gui.py — Interfaccia grafica per tomd2.py.
+tomd2_gui.py — Graphical interface for tomd2.py.
 
-Caratteristiche:
-  - Drag-and-drop di file e cartelle (richiede tkinterdnd2)
-  - Aggiungi file singoli o intere cartelle
-  - Cattura lo stdout di pymupdf4llm nel log della GUI
-  - Progress bar per il file corrente + barra totale
-  - Bottone "Annulla" funzionante
-  - Salva le tue impostazioni in .tomd2_gui_config.json
-  - Mostra solo le opzioni rilevanti per il motore scelto
-  - Thread-safe (uso di queue + root.after, no chiamate tk da thread)
-  - Pulsante "Apri cartella output" per Esplora risorse
+Features:
+  - Drag and drop of files and folders (requires tkinterdnd2)
+  - Add single files or whole folders
+  - Captures pymupdf4llm's stdout in the GUI log
+  - Progress bar for the current file + total bar
+  - Working "Cancel" button
+  - Saves your settings in .tomd2_gui_config.json
+  - Shows only the options relevant to the chosen engine
+  - Thread-safe (queue + root.after, no tk calls from threads)
+  - "Open output folder" button for File Explorer
 """
 from __future__ import annotations
 import json
@@ -27,20 +27,20 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 
-# Drag-and-drop opzionale: se manca, la GUI parte lo stesso ma senza DnD.
+# Optional drag and drop: if missing, the GUI starts anyway without DnD.
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
     HAS_DND = True
 except Exception:
     HAS_DND = False
 
-# Importa le funzioni dello script principale
+# Import the functions of the main script
 sys.path.insert(0, str(Path(__file__).parent))
 from tomd2 import ALL_SUPPORTED, PDF_EXT, choose_engine, convert_one, _KeepAwake
 
-# Il router (convertitore universale ogni->ogni) trascina dipendenze pesanti
-# (pandas, cairosvg, img2pdf, ...). Se UNA fallisce l'import, la GUI deve
-# comunque aprirsi in modalità "solo Markdown" invece di non partire.
+# The router (universal any->any converter) pulls in heavy dependencies
+# (pandas, cairosvg, img2pdf, ...). If ONE fails to import, the GUI must
+# still open in "Markdown only" mode instead of not starting.
 try:
     import router as _router
     _ROUTER_OK = True
@@ -54,7 +54,7 @@ CONFIG_FILE = Path(__file__).parent / ".tomd2_gui_config.json"
 
 
 # ----------------------------------------------------------------------------
-# Helper: redirige stdout/stderr verso una queue (per il log)
+# Helper: redirects stdout/stderr to a queue (for the log)
 # ----------------------------------------------------------------------------
 class QueueWriter:
     def __init__(self, q: queue.Queue, prefix: str = ""):
@@ -63,11 +63,11 @@ class QueueWriter:
     def write(self, s):
         if not s:
             return
-        # accodo per righe per evitare flicker; le righe con \r di tqdm le
-        # gestisco come "linee live" sostituendo l'ultima
+        # queue by lines to avoid flicker; lines with tqdm's \r are
+        # handled as "live lines", replacing the last one
         self._buf += s
         while "\n" in self._buf or "\r" in self._buf:
-            # cerca il primo terminatore
+            # look for the first terminator
             i_nl = self._buf.find("\n")
             i_cr = self._buf.find("\r")
             if i_nl == -1: i = i_cr
@@ -90,7 +90,7 @@ class QueueWriter:
 class TomdGui:
     def __init__(self, root):
         self.root = root
-        self.root.title("tomd2 — Convertitore PDF/Office → Markdown")
+        self.root.title("tomd2 — PDF/Office → Markdown converter")
         self.root.geometry("1000x780")
         self.root.minsize(820, 560)
 
@@ -100,7 +100,7 @@ class TomdGui:
         self.cancel_flag = threading.Event()
         self.worker: threading.Thread | None = None
 
-        # Variabili opzioni (default + carica da config)
+        # Option variables (default + load from config)
         cfg = self._load_config()
         self.var_overwrite       = tk.BooleanVar(value=cfg.get("overwrite", True))
         self.var_page_images     = tk.BooleanVar(value=cfg.get("page_images", True))
@@ -137,12 +137,12 @@ class TomdGui:
         root = ttk.Frame(self.root, padding=10)
         root.pack(fill="both", expand=True)
 
-        # ===== Sezione 1: File =====
+        # ===== Section 1: Files =====
         hdr1 = ttk.Frame(root)
         hdr1.pack(fill="x")
-        ttk.Label(hdr1, text="1) File da convertire",
+        ttk.Label(hdr1, text="1) Files to convert",
                   font=("Segoe UI", 11, "bold")).pack(side="left")
-        dnd_hint = "  (trascina file qui)" if HAS_DND else \
+        dnd_hint = "  (drag files here)" if HAS_DND else \
                    "  (drag-and-drop disabilitato: pip install tkinterdnd2)"
         ttk.Label(hdr1, text=dnd_hint, foreground="#666").pack(side="left")
 
@@ -161,34 +161,34 @@ class TomdGui:
 
         btns = ttk.Frame(root)
         btns.pack(fill="x", pady=(0, 8))
-        ttk.Button(btns, text="+ Aggiungi file", command=self._add_files).pack(side="left", padx=2)
-        ttk.Button(btns, text="+ Aggiungi cartella", command=self._add_folder).pack(side="left", padx=2)
-        ttk.Button(btns, text="− Rimuovi selezionati", command=self._remove_sel).pack(side="left", padx=2)
-        ttk.Button(btns, text="✕ Pulisci tutto", command=self._clear).pack(side="left", padx=2)
+        ttk.Button(btns, text="+ Add files", command=self._add_files).pack(side="left", padx=2)
+        ttk.Button(btns, text="+ Add folder", command=self._add_folder).pack(side="left", padx=2)
+        ttk.Button(btns, text="− Remove selected", command=self._remove_sel).pack(side="left", padx=2)
+        ttk.Button(btns, text="✕ Clear all", command=self._clear).pack(side="left", padx=2)
         self.lbl_count = ttk.Label(btns, text="0 file")
         self.lbl_count.pack(side="right")
 
-        # ===== Sezione 2: Opzioni =====
+        # ===== Section 2: Options =====
         ttk.Label(root, text="2) Opzioni",
                   font=("Segoe UI", 11, "bold")).pack(anchor="w")
-        opts = ttk.LabelFrame(root, text="Impostazioni", padding=10)
+        opts = ttk.LabelFrame(root, text="Settings", padding=10)
         opts.pack(fill="x", pady=(4, 8))
 
-        # ---- Riga 0: Converti in (formato di destinazione) ----
+        # ---- Row 0: Convert to (target format) ----
         r0 = ttk.Frame(opts); r0.pack(fill="x", pady=2)
-        ttk.Label(r0, text="Converti in:", font=("Segoe UI", 10, "bold")).pack(side="left")
+        ttk.Label(r0, text="Convert to:", font=("Segoe UI", 10, "bold")).pack(side="left")
         self.cb_target = ttk.Combobox(r0, textvariable=self.var_target_ext,
                                        state="readonly", width=14,
-                                       values=[".md"])  # popolata dinamicamente
+                                       values=[".md"])  # populated dynamically
         self.cb_target.pack(side="left", padx=4)
         self.cb_target.bind("<<ComboboxSelected>>",
                              lambda e: self._update_engine_visibility())
-        ttk.Label(r0, text="  (selezione dinamica in base ai file caricati)",
+        ttk.Label(r0, text="  (dynamic selection based on the loaded files)",
                   foreground="#666").pack(side="left")
 
-        # ---- Riga 1: motore (solo per .md) + opzioni comuni ----
+        # ---- Row 1: engine (only for .md) + common options ----
         r1 = ttk.Frame(opts); r1.pack(fill="x", pady=2)
-        ttk.Label(r1, text="Motore:").pack(side="left")
+        ttk.Label(r1, text="Engine:").pack(side="left")
         cb = ttk.Combobox(r1, textvariable=self.var_engine, state="readonly", width=16,
                           values=("auto", "pymupdf4llm", "ocr_scan",
                                   "ocr_tesseract", "ocr_image", "ai_pack",
@@ -200,107 +200,107 @@ class TomdGui:
         cb.pack(side="left", padx=4)
         cb.bind("<<ComboboxSelected>>", lambda e: self._update_engine_visibility())
 
-        ttk.Checkbutton(r1, text="Sovrascrivi .md esistenti",
+        ttk.Checkbutton(r1, text="Overwrite existing .md files",
                         variable=self.var_overwrite).pack(side="left", padx=10)
 
-        ttk.Checkbutton(r1, text="Descrizioni IA immagini (Ollama, lento)",
+        ttk.Checkbutton(r1, text="AI image descriptions (Ollama, slow)",
                         variable=self.var_describe_images).pack(side="left", padx=10)
 
-        ttk.Label(r1, text="Cartella media:").pack(side="left", padx=(20, 2))
+        ttk.Label(r1, text="Media folder:").pack(side="left", padx=(20, 2))
         ttk.Entry(r1, textvariable=self.var_media_dir, width=10).pack(side="left")
 
-        # Riga 2: opzioni pymupdf4llm (page-images, dpi, soglia)
+        # Row 2: pymupdf4llm options (page images, dpi, threshold)
         self.frame_pym = ttk.Frame(opts); self.frame_pym.pack(fill="x", pady=2)
-        ttk.Label(self.frame_pym, text="(opzioni PDF)",
+        ttk.Label(self.frame_pym, text="(PDF options)",
                   foreground="#666").pack(side="left", padx=(0, 4))
-        ttk.Checkbutton(self.frame_pym, text="Genera immagini di pagina (garanzia diagrammi)",
+        ttk.Checkbutton(self.frame_pym, text="Generate page images (diagram guarantee)",
                         variable=self.var_page_images).pack(side="left", padx=2)
         ttk.Label(self.frame_pym, text="  DPI:").pack(side="left", padx=(15, 2))
         ttk.Spinbox(self.frame_pym, from_=72, to=600, increment=25,
                     textvariable=self.var_dpi, width=6).pack(side="left")
-        ttk.Label(self.frame_pym, text="  Soglia disegni:").pack(side="left", padx=(15, 2))
+        ttk.Label(self.frame_pym, text="  Drawings threshold:").pack(side="left", padx=(15, 2))
         ttk.Spinbox(self.frame_pym, from_=0, to=50, textvariable=self.var_vector_threshold,
                     width=5).pack(side="left")
-        ttk.Checkbutton(self.frame_pym, text="MD snello (no <details>)",
+        ttk.Checkbutton(self.frame_pym, text="Lean MD (no <details>)",
                         variable=self.var_lean_md).pack(side="left", padx=15)
 
-        # Riga 3: opzioni marker (force-ocr, block-size)
+        # Row 3: marker options (force-ocr, block-size)
         self.frame_mk = ttk.Frame(opts); self.frame_mk.pack(fill="x", pady=2)
-        ttk.Label(self.frame_mk, text="(opzioni marker)",
+        ttk.Label(self.frame_mk, text="(marker options)",
                   foreground="#666").pack(side="left", padx=(0, 4))
-        ttk.Checkbutton(self.frame_mk, text="Forza OCR (PDF scansionati)",
+        ttk.Checkbutton(self.frame_mk, text="Force OCR (scanned PDFs)",
                         variable=self.var_force_ocr).pack(side="left", padx=2)
-        ttk.Label(self.frame_mk, text="  Blocco pagine (0 = file intero):").pack(side="left", padx=(15, 2))
+        ttk.Label(self.frame_mk, text="  Page block (0 = whole file):").pack(side="left", padx=(15, 2))
         ttk.Spinbox(self.frame_mk, from_=0, to=200, textvariable=self.var_block_size,
                     width=5).pack(side="left")
-        ttk.Label(self.frame_mk, text=" ⚠ Marker e' molto lento senza GPU",
+        ttk.Label(self.frame_mk, text=" ⚠ Marker is very slow without a GPU",
                   foreground="#a00").pack(side="left", padx=15)
 
-        # Riga 3b: OCR con IA locale (PaddleOCR-VL / Chandra OCR 2)
+        # Row 3b: OCR with local AI (PaddleOCR-VL / Chandra OCR 2)
         self.frame_vlm = ttk.Frame(opts); self.frame_vlm.pack(fill="x", pady=2)
-        ttk.Label(self.frame_vlm, text="(OCR IA locale)",
+        ttk.Label(self.frame_vlm, text="(local AI OCR)",
                   foreground="#666").pack(side="left", padx=(0, 4))
-        ttk.Label(self.frame_vlm, text="Pagine:").pack(side="left")
+        ttk.Label(self.frame_vlm, text="Pages:").pack(side="left")
         ttk.Entry(self.frame_vlm, textvariable=self.var_vlm_pages,
                   width=14).pack(side="left", padx=2)
-        ttk.Label(self.frame_vlm, text="  Pagine alta qualita' (Chandra):").pack(side="left")
+        ttk.Label(self.frame_vlm, text="  High-quality pages (Chandra):").pack(side="left")
         ttk.Entry(self.frame_vlm, textvariable=self.var_vlm_hq_pages,
                   width=14).pack(side="left", padx=2)
-        ttk.Label(self.frame_vlm, text=" vuoto = tutte  ·  es. 1-10,379",
+        ttk.Label(self.frame_vlm, text=" empty = all  ·  e.g. 1-10,379",
                   foreground="#666").pack(side="left", padx=8)
 
-        # Riga 4: opzioni audio/video (whisper model)
+        # Row 4: audio/video options (whisper model)
         self.frame_wh = ttk.Frame(opts); self.frame_wh.pack(fill="x", pady=2)
-        ttk.Label(self.frame_wh, text="(opzioni audio/video e sottotitoli .srt/.vtt)",
+        ttk.Label(self.frame_wh, text="(audio/video options and .srt/.vtt subtitles)",
                   foreground="#666").pack(side="left", padx=(0, 4))
-        ttk.Label(self.frame_wh, text="Modello Whisper:").pack(side="left", padx=(0, 4))
+        ttk.Label(self.frame_wh, text="Whisper model:").pack(side="left", padx=(0, 4))
         ttk.Combobox(self.frame_wh, textvariable=self.var_whisper_model,
                      state="readonly", width=8,
                      values=("tiny", "base", "small", "medium", "large")).pack(side="left")
         ttk.Label(self.frame_wh,
-                  text="(tiny=veloce ma approssimativo; base/small=consigliati; "
-                       "large=massima qualita' ma MOLTO lento su questo PC)",
+                  text="(tiny=fast but rough; base/small=recommended; "
+                       "large=maximum quality but VERY slow on this PC)",
                   foreground="#666").pack(side="left", padx=10)
 
-        # ===== Sezione 3: Log + Progress =====
-        # NB: impacchettamento "dal basso" per garantire che i PULSANTI e le
-        # BARRE siano SEMPRE visibili, anche rimpicciolendo la finestra.
-        # tkinter riserva prima lo spazio degli elementi side="bottom",
-        # poi il log (expand) riempie solo ciò che resta.
+        # ===== Section 3: Log + Progress =====
+        # NB: packed "from the bottom" to ensure the BUTTONS and
+        # BARS are ALWAYS visible, even when the window is shrunk.
+        # tkinter reserves the space of side="bottom" elements first,
+        # then the log (expand) fills only what is left.
         ttk.Label(root, text="3) Log",
                   font=("Segoe UI", 11, "bold")).pack(anchor="w")
 
-        # --- Pulsanti azione (ancorati IN FONDO, packati per primi) ---
+        # --- Action buttons (anchored at the BOTTOM, packed first) ---
         actions = ttk.Frame(root); actions.pack(side="bottom", fill="x", pady=(8, 0))
-        self.btn_convert = ttk.Button(actions, text="▶ AVVIA CONVERSIONE",
+        self.btn_convert = ttk.Button(actions, text="▶ START CONVERSION",
                                       command=self._start, style="Accent.TButton")
         self.btn_convert.pack(side="left")
         self.btn_cancel = ttk.Button(actions, text="■ Annulla", command=self._cancel,
                                      state="disabled", style="Danger.TButton")
         self.btn_cancel.pack(side="left", padx=8)
-        ttk.Button(actions, text="📂 Apri cartella output",
+        ttk.Button(actions, text="📂 Open output folder",
                    command=self._open_output).pack(side="left", padx=8)
-        self.status = ttk.Label(actions, text="Pronto", foreground="#06a")
+        self.status = ttk.Label(actions, text="Ready", foreground="#06a")
         self.status.pack(side="right")
 
-        # --- Barra del FILE CORRENTE (sopra i pulsanti) ---
+        # --- CURRENT FILE bar (above the buttons) ---
         prog_frame2 = ttk.Frame(root); prog_frame2.pack(side="bottom", fill="x", pady=(2, 0))
-        ttk.Label(prog_frame2, text="In corso:", width=8).pack(side="left")
+        ttk.Label(prog_frame2, text="In progress:", width=8).pack(side="left")
         self.pb_cur = ttk.Progressbar(prog_frame2, mode="determinate", maximum=100)
         self.pb_cur.pack(side="left", fill="x", expand=True, padx=4)
         self.lbl_cur_progress = ttk.Label(prog_frame2, text="--", width=8)
         self.lbl_cur_progress.pack(side="left", padx=4)
-        self._cur_indeterminate = False  # stato barra animata
+        self._cur_indeterminate = False  # animated bar state
 
-        # --- Barra TOTALE (sopra la barra corrente) ---
+        # --- TOTAL bar (above the current bar) ---
         prog_frame = ttk.Frame(root); prog_frame.pack(side="bottom", fill="x")
-        ttk.Label(prog_frame, text="Totale:", width=8).pack(side="left")
+        ttk.Label(prog_frame, text="Total:", width=8).pack(side="left")
         self.pb_file = ttk.Progressbar(prog_frame, mode="determinate")
         self.pb_file.pack(side="left", fill="x", expand=True, padx=4)
         self.lbl_file_progress = ttk.Label(prog_frame, text="0 / 0", width=8)
         self.lbl_file_progress.pack(side="left", padx=4)
 
-        # --- Log (riempie lo spazio rimanente nel mezzo) ---
+        # --- Log (fills the remaining space in the middle) ---
         self.log = scrolledtext.ScrolledText(root, height=10, wrap="word",
                                              font=("Consolas", 9))
         self.log.pack(side="top", fill="both", expand=True, pady=(4, 6))
@@ -310,11 +310,11 @@ class TomdGui:
         self.log.tag_config("info", foreground="#06a")
 
     # ------------------------------------------------------------------------
-    # Eventi UI
+    # UI events
     # ------------------------------------------------------------------------
     def _update_engine_visibility(self):
         eng = self.var_engine.get()
-        # pymupdf4llm opzioni: page-images, DPI, soglia
+        # pymupdf4llm options: page images, DPI, threshold
         if eng in ("auto", "pymupdf4llm"):
             self._show_frame(self.frame_pym)
         else:
@@ -324,12 +324,12 @@ class TomdGui:
             self._show_frame(self.frame_mk)
         else:
             self._hide_frame(self.frame_mk)
-        # OCR IA locale: pagine / pagine alta qualita'
+        # Local AI OCR: pages / high-quality pages
         if eng.startswith("vlm_"):
             self._show_frame(self.frame_vlm)
         else:
             self._hide_frame(self.frame_vlm)
-        # whisper opzioni: audio / video, oppure destinazione sottotitoli
+        # whisper options: audio / video, or subtitle target
         target = (self.var_target_ext.get() or "").lower()
         if eng in ("auto", "audio", "video") or target in (".srt", ".vtt"):
             self._show_frame(self.frame_wh)
@@ -337,7 +337,7 @@ class TomdGui:
             self._hide_frame(self.frame_wh)
 
     def _is_packed(self, fr):
-        # pack_info() solleva TclError se non impacchettato; ritorna dict altrimenti
+        # pack_info() raises TclError if not packed; otherwise returns a dict
         try:
             return bool(fr.pack_info())
         except tk.TclError:
@@ -353,7 +353,7 @@ class TomdGui:
 
     def _add_files(self):
         pats = [
-            ("Tutti i supportati",
+            ("All supported",
              "*.pdf *.pptx *.ppt *.docx *.doc *.xlsx *.xls *.odt *.ods *.odp "
              "*.csv *.tsv *.html *.htm *.json *.xml *.epub *.rtf "
              "*.png *.jpg *.jpeg *.webp *.tif *.tiff *.bmp *.gif "
@@ -375,25 +375,25 @@ class TomdGui:
             ("Notebook Jupyter", "*.ipynb"),
             ("Email", "*.eml"),
             ("Archive", "*.zip *.tar *.tgz"),
-            ("E-book proprietari (servono tool esterni)",
+            ("Proprietary e-books (need external tools)",
              "*.mobi *.azw *.azw3 *.djvu *.fb2"),
             ("Audio (Whisper)", "*.mp3 *.wav *.m4a *.flac *.ogg *.aac *.opus"),
             ("Video (Whisper)", "*.mp4 *.mov *.avi *.webm *.mkv"),
-            ("Codice sorgente",
+            ("Source code",
              "*.py *.js *.ts *.tsx *.jsx *.c *.h *.cpp *.cs *.java *.go *.rs "
              "*.rb *.php *.sh *.ps1 *.sql *.lua *.r *.swift *.kt *.scala "
              "*.css *.scss *.vue *.svelte *.tex *.bib"),
-            ("Config / dati testuali",
+            ("Config / text data",
              "*.yaml *.yml *.toml *.ini *.cfg *.conf *.env *.log "
              "*.diff *.patch *.dockerfile *.makefile"),
-            ("Immagini (lento, marker)", "*.png *.jpg *.jpeg *.webp *.tif *.tiff *.bmp *.gif"),
-            ("Tutti", "*.*"),
+            ("Images (slow, marker)", "*.png *.jpg *.jpeg *.webp *.tif *.tiff *.bmp *.gif"),
+            ("All", "*.*"),
         ]
-        paths = filedialog.askopenfilenames(title="Seleziona file", filetypes=pats)
+        paths = filedialog.askopenfilenames(title="Select files", filetypes=pats)
         self._extend_files([Path(p) for p in paths])
 
     def _add_folder(self):
-        d = filedialog.askdirectory(title="Seleziona cartella")
+        d = filedialog.askdirectory(title="Select folder")
         if not d:
             return
         root = Path(d)
@@ -402,7 +402,7 @@ class TomdGui:
         self._extend_files(files)
 
     def _on_drop(self, event):
-        # Tk passa i path tra '{ }' se hanno spazi
+        # Tk passes paths between '{ }' if they have spaces
         raw = self.root.tk.splitlist(event.data)
         added = []
         for r in raw:
@@ -445,13 +445,13 @@ class TomdGui:
         self._refresh_target_options()
 
     def _refresh_target_options(self):
-        """Aggiorna la combobox 'Converti in' con le destinazioni compatibili
-           per i file attualmente caricati. Sempre .md disponibile."""
+        """Updates the 'Convert to' combobox with the targets compatible
+           with the files currently loaded. .md is always available."""
         if not self.files or not _ROUTER_OK:
-            # Senza router resta solo la conversione verso Markdown
+            # Without the router only conversion to Markdown remains
             self.cb_target["values"] = [".md"]
             return
-        # Intersezione delle destinazioni supportate per OGNI file caricato
+        # Intersection of the targets supported for EACH loaded file
         common: set[str] | None = None
         for f in self.files:
             outs_per_modulo = _router.supported_outputs_for(f.suffix)
@@ -461,7 +461,7 @@ class TomdGui:
             else:
                 common &= outs
         common = sorted(common or {".md"})
-        # .md sempre disponibile e in cima
+        # .md always available and at the top
         if ".md" not in common:
             common = [".md"] + common
         else:
@@ -471,7 +471,7 @@ class TomdGui:
             self.var_target_ext.set(".md")
 
     def _open_output(self):
-        # apre la cartella del primo file selezionato (o della GUI)
+        # opens the folder of the first selected file (or of the GUI)
         target = self.files[0].parent if self.files else Path(__file__).parent
         try:
             if sys.platform.startswith("win"):
@@ -481,18 +481,18 @@ class TomdGui:
             else:
                 subprocess.Popen(["xdg-open", str(target)])
         except Exception as e:
-            messagebox.showerror("Errore", f"Impossibile aprire la cartella:\n{e}")
+            messagebox.showerror("Error", f"Cannot open the folder:\n{e}")
 
     # ------------------------------------------------------------------------
-    # Conversione: thread worker -> queue -> _pump_queue (main thread)
+    # Conversion: worker thread -> queue -> _pump_queue (main thread)
     # ------------------------------------------------------------------------
     def _start(self):
         if not self.files:
-            messagebox.showwarning("Attenzione", "Aggiungi almeno un file.")
+            messagebox.showwarning("Warning", "Add at least one file.")
             return
         self.btn_convert.config(state="disabled")
         self.btn_cancel.config(state="normal")
-        self.status.config(text="Conversione in corso...", foreground="#a60")
+        self.status.config(text="Conversion in progress...", foreground="#a60")
         self.log.delete("1.0", "end")
         self.pb_file.config(value=0, maximum=len(self.files))
         self.lbl_file_progress.config(text=f"0 / {len(self.files)}")
@@ -505,23 +505,23 @@ class TomdGui:
     def _cancel(self):
         if self.cancel_flag.is_set(): return
         self.cancel_flag.set()
-        self.status.config(text="Annullamento... (finisce il file corrente)",
+        self.status.config(text="Cancelling... (finishing the current file)",
                            foreground="#a00")
-        self.queue.put(("LOG", "⚠ Richiesto annullamento, finisco il file corrente..."))
+        self.queue.put(("LOG", "⚠ Cancellation requested, finishing the current file..."))
 
     def _on_close(self):
         if self.worker and self.worker.is_alive():
-            if not messagebox.askyesno("Chiudere?", "Una conversione e' in corso.\n"
-                                                   "Vuoi davvero chiudere la finestra?"):
+            if not messagebox.askyesno("Close?", "A conversion is in progress.\n"
+                                                   "Do you really want to close the window?"):
                 return
             self.cancel_flag.set()
         self._save_config()
         self.root.destroy()
 
     def _worker_run(self):
-        """Eseguito in un thread separato. NON tocca tkinter direttamente."""
-        # Reindirizza stdout/stderr verso la queue: prendiamo cosi' anche i
-        # progress di pymupdf4llm e i log di marker.
+        """Runs in a separate thread. Does NOT touch tkinter directly."""
+        # Redirect stdout/stderr to the queue: this way we also get
+        # pymupdf4llm's progress and marker's logs.
         old_out, old_err = sys.stdout, sys.stderr
         sys.stdout = QueueWriter(self.queue)
         sys.stderr = QueueWriter(self.queue, prefix="[err] ")
@@ -539,7 +539,7 @@ class TomdGui:
         args.whisper_model    = self.var_whisper_model.get()
         args.lean_md          = self.var_lean_md.get()
         args.describe_images  = self.var_describe_images.get()
-        args.describe_model   = None    # default di img_describe (qwen2.5vl:3b)
+        args.describe_model   = None    # img_describe default (qwen2.5vl:3b)
         args.pages            = self.var_vlm_pages.get().strip() or None
         args.hq_pages         = self.var_vlm_hq_pages.get().strip() or None
         args.vlm_threads      = None
@@ -563,30 +563,30 @@ class TomdGui:
 
         results = []
         try:
-            self.queue.put(("LOG", f"File da convertire: {len(self.files)} -> {target_ext}"))
-            # Keep-awake: il PC non si sospende durante la conversione
+            self.queue.put(("LOG", f"Files to convert: {len(self.files)} -> {target_ext}"))
+            # Keep-awake: the PC does not sleep during the conversion
             with _KeepAwake():
                 for i, f in enumerate(self.files, 1):
                     if self.cancel_flag.is_set():
-                        self.queue.put(("LOG", f"⏹ Annullato dopo {i-1} file."))
+                        self.queue.put(("LOG", f"⏹ Cancelled after {i-1} file."))
                         break
                     self.queue.put(("PROG", (i - 1, len(self.files), f.name)))
-                    self.queue.put(("CUR_START", f.name))  # avvia barra file corrente
+                    self.queue.put(("CUR_START", f.name))  # start the current file bar
                     dst = f.with_suffix(target_ext)
-                    # PROTEZIONE ORIGINALI: se la destinazione esiste ed e' piu'
-                    # vecchia del sorgente, e' con ogni probabilita' il file
-                    # ORIGINALE da cui il sorgente era stato generato (es.
-                    # 2.md -> 2.pdf dove 2.pdf e' l'originale). Non lo tocco.
+                    # ORIGINALS PROTECTION: if the destination exists and is
+                    # older than the source, it is very probably the
+                    # ORIGINAL file the source was generated from (e.g.
+                    # 2.md -> 2.pdf where 2.pdf is the original). Do not touch it.
                     if (dst.exists() and dst.resolve() != f.resolve()
                             and dst.stat().st_mtime < f.stat().st_mtime):
                         safe = f.with_name(f"{f.stem}_convertito{target_ext}")
                         self.queue.put(("LOG",
-                            f"⚠ {dst.name} esiste ed e' piu' vecchio del sorgente: "
-                            f"probabile ORIGINALE. Scrivo {safe.name}."))
+                            f"⚠ {dst.name} exists and is older than the source: "
+                            f"probably the ORIGINAL. Writing {safe.name}."))
                         dst = safe
 
                     if target_ext in (".md", ".markdown"):
-                        # Modalità ad alta fedeltà via tomd2.convert_one
+                        # High-fidelity mode via tomd2.convert_one
                         self.queue.put(("LOG", f"\n▶ [{i}/{len(self.files)}] "
                                                f"{f.name}  -> .md  "
                                                f"[{choose_engine(f, args.engine)}]"))
@@ -598,17 +598,17 @@ class TomdGui:
                                          "engine": r.get("engine","auto"),
                                          "module": "markdown"})
                     elif not _ROUTER_OK:
-                        # Router non disponibile: conversione universale disattivata
+                        # Router not available: universal conversion disabled
                         ok_i = False
                         results.append({"src": str(f), "out": str(dst),
                                          "ok": False,
-                                         "note": ("Conversione universale non disponibile "
-                                                  f"(router non caricato: {_ROUTER_ERR}). "
-                                                  "Usa il formato .md, oppure reinstalla le "
+                                         "note": ("Universal conversion not available "
+                                                  f"(router not loaded: {_ROUTER_ERR}). "
+                                                  "Use the .md format, or reinstall the "
                                                   "dipendenze."),
                                          "engine": "-", "module": "-"})
                     else:
-                        # Conversione universale via router.convert
+                        # Universal conversion via router.convert
                         self.queue.put(("LOG", f"\n▶ [{i}/{len(self.files)}] "
                                                f"{f.name}  -> {target_ext}"))
                         r = _router.convert(f, dst, opts_router)
@@ -617,7 +617,7 @@ class TomdGui:
                                          "ok": ok_i, "note": r.get("note",""),
                                          "engine": r.get("module") or "-",
                                          "module": r.get("module") or "-"})
-                    self.queue.put(("CUR_DONE", None))  # file corrente completato
+                    self.queue.put(("CUR_DONE", None))  # current file finished
                     if ok_i:
                         self.queue.put(("OK",
                             f"   ✓ OK  [{results[-1]['module']}]  "
@@ -638,12 +638,12 @@ class TomdGui:
                     f"{Path(r['out']).name} ({r.get('module','-')})"))
             self.queue.put(("DONE", (ok, len(results))))
         except Exception as e:
-            self.queue.put(("ERR", f"ERRORE WORKER: {type(e).__name__}: {e}"))
+            self.queue.put(("ERR", f"WORKER ERROR: {type(e).__name__}: {e}"))
             self.queue.put(("DONE", (0, 0)))
         finally:
             sys.stdout, sys.stderr = old_out, old_err
 
-    # Pompa eventi dal thread worker al main thread.
+    # Pumps events from the worker thread to the main thread.
     def _pump_queue(self):
         try:
             while True:
@@ -653,12 +653,12 @@ class TomdGui:
             pass
         self.root.after(80, self._pump_queue)
 
-    # --- gestione barra "file corrente" -------------------------------------
+    # --- "current file" bar handling ------------------------------------------
     _PCT_RE = re.compile(r"(\d{1,3})\s*%")
     _FRAC_RE = re.compile(r"\b(\d+)\s*/\s*(\d+)\b")
 
     def _cur_start(self, name: str):
-        """Inizio conversione di un file: barra animata (non sappiamo ancora la %)."""
+        """Start of a file's conversion: animated bar (the % is not known yet)."""
         self.lbl_cur_progress.config(text="...")
         try:
             self.pb_cur.config(mode="indeterminate")
@@ -668,7 +668,7 @@ class TomdGui:
             pass
 
     def _cur_set_pct(self, pct: int):
-        """Percentuale reale rilevata dallo stdout: passa a barra determinata."""
+        """Real percentage detected from stdout: switches to a determinate bar."""
         pct = max(0, min(100, pct))
         if self._cur_indeterminate:
             try: self.pb_cur.stop()
@@ -679,7 +679,7 @@ class TomdGui:
         self.lbl_cur_progress.config(text=f"{pct}%")
 
     def _cur_done(self):
-        """Fine conversione del file: barra a 100% e ferma."""
+        """End of a file's conversion: bar at 100% and stopped."""
         if self._cur_indeterminate:
             try: self.pb_cur.stop()
             except tk.TclError: pass
@@ -689,8 +689,8 @@ class TomdGui:
         self.lbl_cur_progress.config(text="100%")
 
     def _maybe_update_cur_from_text(self, text: str):
-        """Estrae una percentuale dalle righe di log (tqdm di pymupdf4llm/marker,
-           oppure 'PROGRESS_AV: NN%' emesso da convert_av per ffmpeg)."""
+        """Extracts a percentage from the log lines (tqdm of pymupdf4llm/marker,
+           or 'PROGRESS_AV: NN%' emitted by convert_av for ffmpeg)."""
         m = self._PCT_RE.search(text)
         if m:
             self._cur_set_pct(int(m.group(1)))
@@ -707,7 +707,7 @@ class TomdGui:
             self.log.see("end")
             self._maybe_update_cur_from_text(payload)
         elif kind == "LOG_LIVE":
-            # sostituisce l'ultima riga (tipico di tqdm \r)
+            # replaces the last line (typical of tqdm \r)
             self.log.delete("end-2l", "end-1l")
             self.log.insert("end-1l", payload + "\n", "live")
             self.log.see("end")
@@ -736,11 +736,11 @@ class TomdGui:
             else:
                 self.status.config(text=f"Fatto: {ok}/{tot} OK", foreground="#0a6")
                 if tot:
-                    messagebox.showinfo("Conversione completata",
+                    messagebox.showinfo("Conversion completed",
                                         f"Completati: {ok} / {tot}")
 
     # ------------------------------------------------------------------------
-    # Persistenza impostazioni
+    # Saving the settings
     # ------------------------------------------------------------------------
     def _load_config(self) -> dict:
         try:
@@ -768,7 +768,7 @@ class TomdGui:
         try:
             CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
         except Exception:
-            pass  # niente di drammatico se non riesce
+            pass  # nothing dramatic if it fails
 
 
 # ----------------------------------------------------------------------------

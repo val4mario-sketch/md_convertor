@@ -1,9 +1,9 @@
-"""Contratto astratto di un convertitore.
+"""Abstract contract of a converter.
 
-Ogni convertitore concreto e' una classe indipendente che eredita da
-``BaseConverter`` e dichiara i formati di input/output supportati. La pipeline
-(``core/pipeline.py``) si occupa di file temporaneo, validazione e commit: il
-convertitore deve solo *produrre* l'output e dichiarare come estrarne i metadati.
+Each concrete converter is an independent class inheriting from
+``BaseConverter`` and declaring the supported input/output formats. The pipeline
+(``core/pipeline.py``) takes care of the temporary file, validation and commit: the
+converter only has to *produce* the output and declare how to extract its metadata.
 """
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ from pathlib import Path
 
 
 def norm_ext(ext: str) -> str:
-    """Normalizza un'estensione: minuscolo, senza punto iniziale."""
+    """Normalizes an extension: lowercase, no leading dot."""
     return (ext or "").lower().lstrip(".")
 
 
 class BaseConverter(ABC):
-    # --- da sovrascrivere nelle sottoclassi ---
+    # --- to be overridden in subclasses ---
     name: str = "base"
     source_formats: frozenset[str] = frozenset()
     target_formats: frozenset[str] = frozenset()
@@ -27,34 +27,34 @@ class BaseConverter(ABC):
     def supports(cls, src_ext: str, dst_ext: str) -> bool:
         return norm_ext(src_ext) in cls.source_formats and norm_ext(dst_ext) in cls.target_formats
 
-    # --- metadati per la validazione (gatekeeper) ---
+    # --- metadata for validation (gatekeeper) ---
     def extract_source_metadata(self, src: Path, opts: dict | None = None) -> dict:
-        """Metadati del file di partenza (es. albero dei titoli, righe/colonne).
+        """Metadata of the starting file (e.g. heading tree, rows/columns).
 
-        Riceve ``opts`` perche' deve applicare lo STESSO pre-processing della
-        conversione (es. pulizia dei marcatori), altrimenti il confronto con il
-        prodotto sarebbe incoerente."""
+        Receives ``opts`` because it must apply the SAME pre-processing as the
+        conversion (e.g. marker clean-up), otherwise the comparison with the
+        product would be inconsistent."""
         return {}
 
     def extract_target_metadata(self, dst: Path) -> dict:
-        """Metadati del file prodotto (es. n. pagine PDF, righe/colonne)."""
+        """Metadata of the produced file (e.g. number of PDF pages, rows/columns)."""
         return {}
 
     def validators(self) -> list:
-        """Lista di validatori applicati a questa conversione (gatekeeper)."""
+        """List of validators applied to this conversion (gatekeeper)."""
         return []
 
-    # --- conversione vera e propria ---
+    # --- the actual conversion ---
     @abstractmethod
     def convert(self, src: Path, dst: Path, opts: dict) -> dict:
-        """Esegue la conversione scrivendo su ``dst``.
+        """Runs the conversion, writing to ``dst``.
 
-        ATTENZIONE: ``dst`` e' un file TEMPORANEO scelto dalla pipeline; non e'
-        ancora la destinazione definitiva. Questo metodo puo' sollevare
-        eccezioni: la pipeline le cattura, scarta il temporaneo e logga.
+        WARNING: ``dst`` is a TEMPORARY file chosen by the pipeline; it is not
+        yet the final destination. This method may raise
+        exceptions: the pipeline catches them, discards the temporary file and logs.
 
-        Ritorna un dict opzionale::
+        Returns an optional dict::
 
-            {"note": "<descrizione breve>", "metadata": {<extra per i validatori>}}
+            {"note": "<short description>", "metadata": {<extra for the validators>}}
         """
         raise NotImplementedError

@@ -1,35 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-tomd2.py — Converte file in Markdown ad alta fedelta', GRATIS e in LOCALE.
+tomd2.py — Converts files to high-fidelity Markdown, FREE and LOCAL.
 
-Engine PRIMARIO per PDF: pymupdf4llm (legge il livello-testo del PDF, velocissimo
-su CPU, niente modelli AI da scaricare). Adatto a PDF "nativi" come slide di
-PowerPoint esportate (testo selezionabile, vettoriale).
+PRIMARY engine for PDFs: pymupdf4llm (reads the PDF text layer, very fast
+on CPU, no AI models to download). Suited to "native" PDFs such as exported
+PowerPoint slides (selectable text, vector).
 
-Routing automatico:
+Automatic routing:
   - PDF (.pdf)                              -> pymupdf4llm  [default]
   - Office/Web (.pptx .docx .xlsx .html ..) -> markitdown
-  - Immagini (.png .jpg ...)                -> marker (unico engine sensato per immagini)
-  - .md .txt                                -> copiati cosi' come sono
+  - Images (.png .jpg ...)                  -> marker (the only sensible engine for images)
+  - .md .txt                                -> copied as they are
 
-Opzionale:
-  --engine marker      forza marker (solo per PDF scansionati o casi limite).
-                       Lento su CPU senza GPU; usa --block-size per file grandi.
+Optional:
+  --engine marker      forces marker (only for scanned PDFs or edge cases).
+                       Slow on CPU without a GPU; use --block-size for large files.
 
 Output:
-  <nomefile>.md nella STESSA cartella del file originale.
-  Figure e immagini di pagina in media/<nomefile>/.
-  (la cartella 'media/' raccoglie le immagini di TUTTI i file convertiti)
+  <filename>.md in the SAME folder as the original file.
+  Figures and page images in media/<filename>/.
+  (the 'media/' folder collects the images of ALL converted files)
 
-Uso rapido:
-    python tomd2.py 2.pdf --overwrite                # pymupdf4llm (rapido)
-    python tomd2.py "*.pdf" --overwrite              # batch di PDF
-    python tomd2.py slide.pdf --engine marker        # forza marker (lento)
+Quick use:
+    python tomd2.py 2.pdf --overwrite                # pymupdf4llm (fast)
+    python tomd2.py "*.pdf" --overwrite              # batch of PDFs
+    python tomd2.py slide.pdf --engine marker        # force marker (slow)
     python tomd2.py scan.pdf --engine marker --force-ocr --block-size 15
-    python tomd2.py 2.pdf --no-page-images           # senza render pagina
+    python tomd2.py 2.pdf --no-page-images           # no page render
 
-Dipendenze:
+Dependencies:
     pip install -U markitdown marker-pdf pymupdf pymupdf4llm
 """
 
@@ -38,7 +38,7 @@ import argparse, json, re, shutil, subprocess, sys, time
 from pathlib import Path
 
 # ----------------------------------------------------------------------------
-# Estensioni gestite
+# Handled extensions
 # ----------------------------------------------------------------------------
 OFFICE_WEB_EXT = {".pptx", ".docx", ".xlsx", ".xls", ".doc", ".ppt",
                   ".html", ".htm", ".csv", ".tsv", ".json", ".xml", ".epub", ".rtf",
@@ -47,7 +47,7 @@ IMAGE_EXT      = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp", ".g
 PDF_EXT        = {".pdf"}
 PASSTHROUGH    = {".md", ".markdown", ".txt"}
 
-# Codice sorgente: mappa estensione -> linguaggio per il blocco markdown
+# Source code: maps extension -> language for the markdown block
 CODE_LANG = {
     ".py":"python", ".pyw":"python", ".pyi":"python",
     ".js":"javascript", ".mjs":"javascript", ".cjs":"javascript",
@@ -85,7 +85,7 @@ CODE_LANG = {
 }
 CODE_EXT = set(CODE_LANG.keys())
 
-# File di config / dati testuali (anche senza linguaggio specifico)
+# Config / text data files (also without a specific language)
 TEXT_DATA_LANG = {
     ".yaml":"yaml", ".yml":"yaml",
     ".toml":"toml",
@@ -109,13 +109,13 @@ IPYNB_EXT = {".ipynb"}
 # Email
 EMAIL_EXT = {".eml"}
 
-# Archive (zip, tar, ecc.)
+# Archives (zip, tar, etc.)
 ARCHIVE_EXT = {".zip", ".tar", ".tgz", ".tar.gz", ".tbz", ".tar.bz2"}
 
-# E-book proprietari (richiedono strumenti esterni come calibre)
+# Proprietary e-books (need external tools such as calibre)
 EBOOK_EXT = {".mobi", ".azw", ".azw3", ".kfx", ".fb2", ".djvu", ".djv"}
 
-# Audio/Video (richiedono whisper per la trascrizione)
+# Audio/Video (need whisper for transcription)
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".opus", ".wma"}
 VIDEO_EXT = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".flv", ".wmv", ".m4v"}
 
@@ -125,7 +125,7 @@ ALL_SUPPORTED  = (OFFICE_WEB_EXT | IMAGE_EXT | PDF_EXT | PASSTHROUGH |
 
 
 # ----------------------------------------------------------------------------
-# Ricerca dei file (nomi, percorsi, glob)
+# File search (names, paths, globs)
 # ----------------------------------------------------------------------------
 def resolve_inputs(tokens, root: Path, recursive: bool):
     found, missing = [], []
@@ -160,14 +160,14 @@ def resolve_inputs(tokens, root: Path, recursive: bool):
 
 
 # ----------------------------------------------------------------------------
-# Utility immagini: link relativi corretti
+# Image utility: correct relative links
 # ----------------------------------------------------------------------------
 def _fix_charset_mojibake(text: str) -> str:
-    """Sistema i caratteri 'mojibake' (UTF-8 letto come CP1252/CP437).
-       Esempi rilevati dalle recensioni LLM:
-         ┬«  ->  «     (CP437/cp850 misread di U+00AB)
+    """Fixes 'mojibake' characters (UTF-8 read as CP1252/CP437).
+       Examples found by the LLM reviews:
+         ┬«  ->  «     (CP437/cp850 misread of U+00AB)
          ┬»  ->  »
-         тАФ  ->  —     (CP1252 misread di U+2014 em-dash)
+         тАФ  ->  —     (CP1252 misread of U+2014 em-dash)
          тАЪ  ->  ‚
          тАЛ  ->  ‌
          тАЭ  ->  ”
@@ -175,20 +175,20 @@ def _fix_charset_mojibake(text: str) -> str:
          ┬·  ->  ·
          тДв  ->  ™
     """
-    # 1) tentativo "intelligente": prova a re-encodare se vediamo i marker tipici
+    # 1) "smart" attempt: try to re-encode if we see the typical markers
     if "тАФ" in text or "┬«" in text or "тАЭ" in text or "├¿" in text:
         for src_enc, dst_enc in (("cp1252","utf-8"), ("cp437","utf-8"),
                                   ("latin-1","utf-8")):
             try:
                 fixed = text.encode(src_enc, errors="strict").decode(dst_enc, errors="strict")
-                # Heuristica: il fix riduce le sequenze di byte sospetti
+                # Heuristic: the fix reduces the suspicious byte sequences
                 if (fixed.count("тА") + fixed.count("┬") + fixed.count("├")
                         < text.count("тА") + text.count("┬") + text.count("├")):
                     text = fixed
                     break
             except (UnicodeEncodeError, UnicodeDecodeError):
                 continue
-    # 2) sostituzioni dirette di sequenze residue
+    # 2) direct replacement of residual sequences
     replacements = {
         "тАФ": "—", "тАУ": "–", "тАЪ": "‚", "тАЛ": "‌",
         "тАЭ": "”", "тАЮ": "„", "тАЬ": "“", "тАЩ": "’", "тАШ": "‘",
@@ -204,11 +204,11 @@ def _fix_charset_mojibake(text: str) -> str:
 
 
 def _postprocess_math(md: str) -> str:
-    """Pulizie conservative tipiche dei PDF di slide matematiche.
-       Protegge i link Markdown ![alt](path) e [text](url) per non corrompere
-       i path delle immagini (es. 'Matlab1_AA2526_assets').
+    """Conservative clean-ups typical of mathematical slide PDFs.
+       Protects the Markdown links ![alt](path) and [text](url) so as not to corrupt
+       image paths (e.g. 'Matlab1_AA2526_assets').
     """
-    # 0) proteggi link markdown (sia immagini ![..](..) sia link [..](..))
+    # 0) protect markdown links (both images ![..](..) and links [..](..))
     stash: list[str] = []
     def _hide(m):
         stash.append(m.group(0))
@@ -220,46 +220,46 @@ def _postprocess_math(md: str) -> str:
         r"([A-Za-z])\[([A-Za-z0-9 ]{1,6})\](?!\()",
         lambda m: f"{m.group(1)}^{{{m.group(2)}}}", md)
 
-    # 2) 'xn-1' -> 'x_{n-1}' solo dentro italici _..._ (non multilinea)
+    # 2) 'xn-1' -> 'x_{n-1}' only inside _..._ italics (not multi-line)
     def _pedice_in_ital(m):
         body = m.group(1)
         body = re.sub(r"([A-Za-z])(\d+|n-\d+|n\+\d+)", r"\1_{\2}", body)
         return f"_{body}_"
     md = re.sub(r"_([^_\n]{1,160})_", _pedice_in_ital, md)
 
-    # 3) ripristina i link
+    # 3) restore the links
     md = re.sub(r"\x00LNK(\d+)\x00", lambda m: stash[int(m.group(1))], md)
     return md
 
 
 def _rewrite_image_paths(md: str, prefix: str) -> str:
-    """Fa puntare i link delle immagini alla sottocartella `prefix`.
-       Salta link assoluti, URL e link gia' relativi a `prefix`."""
+    """Points the image links to the `prefix` subfolder.
+       Skips absolute links, URLs and links already relative to `prefix`."""
     def repl(m):
         path = m.group(1).strip()
         if path.startswith(("http://", "https://", "/")) or path.startswith(prefix + "/") or path.startswith(prefix):
             return m.group(0)
-        # gia' relativo? estrai solo il basename per metterlo sotto prefix
+        # already relative? extract only the basename to put it under prefix
         return f"]({prefix}/{Path(path).name})"
     return re.sub(r"\]\(([^)]+\.(?:png|jpg|jpeg|webp|gif|tif|tiff|bmp))\)",
                   repl, md, flags=re.IGNORECASE)
 
 
-# Destinazione di link/immagine: ammette UNA coppia di parentesi bilanciate
-# interne (es. 'media/DocScanner (2)/img.png'), come da spec CommonMark.
+# Link/image destination: allows ONE pair of balanced inner
+# parentheses (e.g. 'media/DocScanner (2)/img.png'), as in the CommonMark spec.
 _MD_LINK_RE = re.compile(
     r"(!?\[[^\]\n]*\])\(([^()\n]*(?:\([^()\n]*\)[^()\n]*)*)\)")
 
 
 def _encode_md_link_urls(md: str) -> str:
-    """Percent-encoding dei percorsi nei link/immagini Markdown.
+    """Percent-encoding of the paths in Markdown links/images.
 
-       Una destinazione con spazi nudi ('media/APPUNTI ASTRONOMIA/f.png')
-       NON e' CommonMark valido: VS Code, GitHub, Obsidian ecc. non la
-       renderizzano e l'immagine (formula inclusa) "sparisce". Con
-       'media/APPUNTI%20ASTRONOMIA/f.png' funziona ovunque.
-       Non tocca URL esterni, ancore, destinazioni <...> o gia' pulite;
-       '%' resta safe quindi i path gia' encodati non vengono ri-encodati."""
+       A destination with bare spaces ('media/MY NOTES/f.png')
+       is NOT valid CommonMark: VS Code, GitHub, Obsidian etc. do not
+       render it and the image (formula included) "disappears". With
+       'media/MY%20NOTES/f.png' it works everywhere.
+       Does not touch external URLs, anchors, <...> or already clean destinations;
+       '%' stays safe so already encoded paths are not re-encoded."""
     from urllib.parse import quote
 
     def repl(m):
@@ -281,9 +281,9 @@ def _encode_md_link_urls(md: str) -> str:
 
 
 # ----------------------------------------------------------------------------
-# Motore 1: markitdown (DOCX / HTML / EPUB) — gratis, istantaneo
-# Usato come fallback per Office/Web NON xlsx/pptx (per quelli c'e' un motore
-# dedicato, vedi sotto).
+# Engine 1: markitdown (DOCX / HTML / EPUB) — free, instant
+# Used as a fallback for Office/Web files that are NOT xlsx/pptx (those have an engine
+# dedicated one, see below).
 # ----------------------------------------------------------------------------
 def convert_with_markitdown(src: Path) -> str:
     from markitdown import MarkItDown
@@ -291,14 +291,14 @@ def convert_with_markitdown(src: Path) -> str:
 
 
 # ----------------------------------------------------------------------------
-# Motore Excel: openpyxl dedicato (qualita' ottima, niente NaN, niente Unnamed)
+# Excel engine: dedicated openpyxl (excellent quality, no NaN, no Unnamed)
 # ----------------------------------------------------------------------------
 def convert_with_xlsx(src: Path) -> str:
-    """Converte .xlsx in Markdown leggibile da un'IA:
-       - 1 sezione H2 per ogni foglio
-       - tabelle markdown vere (non NaN, non 'Unnamed: X')
-       - rispetta le merged cells (la prima cella tiene il valore)
-       - celle numeriche formattate compatte (no decimali infiniti)"""
+    """Converts .xlsx to Markdown an AI can read:
+       - 1 H2 section per sheet
+       - real markdown tables (no NaN, no 'Unnamed: X')
+       - respects merged cells (the first cell holds the value)
+       - numeric cells formatted compactly (no endless decimals)"""
     from openpyxl import load_workbook
 
     def _fmt(v):
@@ -317,38 +317,38 @@ def convert_with_xlsx(src: Path) -> str:
         parts.append(f"\n## {sheet_name}\n")
         rows = [[_fmt(c.value) for c in row] for row in ws.iter_rows()]
         if not rows:
-            parts.append("_(foglio vuoto)_\n"); continue
-        # taglia colonne completamente vuote a destra
+            parts.append("_(empty sheet)_\n"); continue
+        # cut completely empty columns on the right
         max_cols = 0
         for r in rows:
             for i in range(len(r) - 1, -1, -1):
                 if r[i] != "":
                     max_cols = max(max_cols, i + 1); break
-        if max_cols == 0: parts.append("_(foglio vuoto)_\n"); continue
+        if max_cols == 0: parts.append("_(empty sheet)_\n"); continue
         rows = [r[:max_cols] + [""] * (max_cols - len(r[:max_cols])) for r in rows]
-        # taglia righe completamente vuote in fondo
+        # cut completely empty rows at the bottom
         while rows and all(c == "" for c in rows[-1]):
             rows.pop()
         if not rows:
-            parts.append("_(foglio vuoto)_\n"); continue
-        # cerca la prima riga "header": prima riga non vuota con almeno 2 celle
+            parts.append("_(empty sheet)_\n"); continue
+        # look for the first "header" row: first non-empty row with at least 2 cells
         hdr_idx = 0
         for i, r in enumerate(rows):
             if sum(1 for c in r if c) >= 2:
                 hdr_idx = i; break
-        # se sopra l'header ci sono righe titolo/note, le metto come testo
+        # if there are title/note rows above the header, write them as text
         for i in range(hdr_idx):
             tx = " ".join(c for c in rows[i] if c)
             if tx: parts.append(f"_{tx}_\n")
-        # tabella markdown
+        # markdown table
         hdr = rows[hdr_idx]
-        # se header e' tutto vuoto, usa Col_1, Col_2...
+        # if the header is all empty, use Col_1, Col_2...
         if all(c == "" for c in hdr):
             hdr = [f"Col_{i+1}" for i in range(len(hdr))]
         parts.append("| " + " | ".join(hdr) + " |")
         parts.append("|" + "|".join(["---"] * len(hdr)) + "|")
         for r in rows[hdr_idx + 1:]:
-            # salta righe completamente vuote
+            # skip completely empty rows
             if all(c == "" for c in r): continue
             parts.append("| " + " | ".join(r) + " |")
         parts.append("")
@@ -357,14 +357,14 @@ def convert_with_xlsx(src: Path) -> str:
 
 
 # ----------------------------------------------------------------------------
-# Motore PowerPoint: python-pptx dedicato (testo + TUTTE le immagini estratte)
+# PowerPoint engine: dedicated python-pptx (text + ALL the extracted images)
 # ----------------------------------------------------------------------------
 def convert_with_pptx(src: Path, media_dirname: str = "media") -> tuple[str, Path]:
-    """Converte .pptx in Markdown estraendo:
-       - una sezione H2 per ogni slide (testo titolo + corpo + note)
-       - TUTTE le immagini incorporate (Picture + Shape con fill image)
-       - le tabelle, in markdown vero
-       - le note del relatore
+    """Converts .pptx to Markdown, extracting:
+       - an H2 section per slide (title text + body + notes)
+       - ALL the embedded images (Picture + Shape with image fill)
+       - tables, in real markdown
+       - speaker notes
     """
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -381,7 +381,7 @@ def convert_with_pptx(src: Path, media_dirname: str = "media") -> tuple[str, Pat
     img_idx = 0
 
     def _walk_shapes(shapes, slide_no: int, depth: int = 0):
-        """Visita ricorsivamente le shape (gestisce anche i group)."""
+        """Recursively visits the shapes (also handles groups)."""
         nonlocal img_idx
         out: list[str] = []
         for shape in shapes:
@@ -390,12 +390,12 @@ def convert_with_pptx(src: Path, media_dirname: str = "media") -> tuple[str, Pat
             except Exception:
                 stype = None
 
-            # group: ricorsione
+            # group: recursion
             if stype == MSO_SHAPE_TYPE.GROUP:
                 out.extend(_walk_shapes(shape.shapes, slide_no, depth + 1))
                 continue
 
-            # immagine: salva e linka
+            # image: save and link it
             if stype == MSO_SHAPE_TYPE.PICTURE or (
                 hasattr(shape, "image") and getattr(shape, "image", None)):
                 try:
@@ -426,13 +426,13 @@ def convert_with_pptx(src: Path, media_dirname: str = "media") -> tuple[str, Pat
                 for para in shape.text_frame.paragraphs:
                     text = "".join(run.text for run in para.runs).strip()
                     if not text: continue
-                    # heuristic: la prima text frame della slide e' spesso il titolo
+                    # heuristic: the first text frame of the slide is often the title
                     out.append(text)
         return out
 
     for i, slide in enumerate(pres.slides, start=1):
         parts.append(f"\n## Slide {i}\n")
-        # titolo se presente
+        # title if present
         title = None
         try:
             if slide.shapes.title and slide.shapes.title.has_text_frame:
@@ -441,18 +441,18 @@ def convert_with_pptx(src: Path, media_dirname: str = "media") -> tuple[str, Pat
             pass
         if title:
             parts.append(f"### {title}\n")
-        # contenuto (tutte le shape tranne il titolo)
+        # content (all shapes except the title)
         content_shapes = [s for s in slide.shapes
                           if not (slide.shapes.title is not None and s == slide.shapes.title)]
         body = _walk_shapes(content_shapes, i)
         if body:
             parts.append("\n".join(body))
-        # note del relatore
+        # speaker notes
         try:
             if slide.has_notes_slide:
                 notes = slide.notes_slide.notes_text_frame.text.strip()
                 if notes:
-                    parts.append(f"\n**Note relatore:** {notes}")
+                    parts.append(f"\n**Speaker notes:** {notes}")
         except Exception:
             pass
 
@@ -460,7 +460,7 @@ def convert_with_pptx(src: Path, media_dirname: str = "media") -> tuple[str, Pat
 
 
 # ----------------------------------------------------------------------------
-# Motore CSV / TSV: tabella markdown pulita + statistiche di base
+# CSV / TSV engine: clean markdown table + basic statistics
 # ----------------------------------------------------------------------------
 def _is_number(s: str) -> bool:
     if s is None or s == "": return False
@@ -470,14 +470,14 @@ def _is_number(s: str) -> bool:
 
 
 def convert_with_csv(src: Path, max_preview_rows: int = 50) -> str:
-    """Converte .csv/.tsv in Markdown con buona euristica per CSV "tecnici":
-       - se la prima riga e' un TITOLO (cella sola), lo mette come H1
-       - se ci sono righe di UNITA' di misura sotto l'header, le riconosce
-       - statistica delle colonne numeriche (n, min, media, max)
-       - mostra max N righe per non gonfiare il .md
+    """Converts .csv/.tsv to Markdown with good heuristics for "technical" CSVs:
+       - if the first row is a TITLE (single cell), makes it an H1
+       - if there are rows of UNITS under the header, recognizes them
+       - statistics of the numeric columns (n, min, mean, max)
+       - shows at most N rows so as not to bloat the .md
     """
     import csv
-    # rileva delimitatore
+    # detect the delimiter
     with open(src, "r", encoding="utf-8", errors="replace", newline="") as f:
         sample = f.read(4096); f.seek(0)
         try:
@@ -489,15 +489,15 @@ def convert_with_csv(src: Path, max_preview_rows: int = 50) -> str:
         rows = [[c.strip() for c in r] for r in reader]
 
     if not rows:
-        return f"# {src.name}\n\n_(file vuoto)_\n"
+        return f"# {src.name}\n\n_(empty file)_\n"
 
-    # max colonne usate in tutto il file
+    # maximum columns used in the whole file
     max_cols = max((len(r) for r in rows), default=0)
     rows = [r + [""] * (max_cols - len(r)) for r in rows]
 
     parts: list[str] = [f"# {src.name}\n"]
 
-    # --- 1) cerca le righe "titolo" iniziali (una sola cella piena) ---
+    # --- 1) look for the initial "title" rows (a single filled cell) ---
     title_rows = []
     i = 0
     while i < len(rows):
@@ -511,7 +511,7 @@ def convert_with_csv(src: Path, max_preview_rows: int = 50) -> str:
     for tr in title_rows:
         parts.append(f"_(titolo: **{tr}**)_\n")
 
-    # --- 2) header = prima riga successiva con tutte celle piene e NON numeriche ---
+    # --- 2) header = next row with all cells filled and NOT numeric ---
     hdr_idx = i
     while hdr_idx < len(rows):
         r = rows[hdr_idx]
@@ -520,14 +520,14 @@ def convert_with_csv(src: Path, max_preview_rows: int = 50) -> str:
             break
         hdr_idx += 1
     if hdr_idx >= len(rows):
-        # nessun header: invento Col_X e parto dalla prima riga "i"
+        # no header: invent Col_X and start from row "i"
         hdr_idx = i
         headers = [f"Col_{k+1}" for k in range(max_cols)]
         data_start = i
         unit_row = None
     else:
         headers = list(rows[hdr_idx])
-        # se la riga successiva e' "tutte stringhe non numeriche" -> UNITA' di misura
+        # if the next row is "all non-numeric strings" -> UNITS
         unit_row = None
         if hdr_idx + 1 < len(rows):
             r2 = rows[hdr_idx + 1]
@@ -540,7 +540,7 @@ def convert_with_csv(src: Path, max_preview_rows: int = 50) -> str:
         else:
             data_start = hdr_idx + 1
 
-    # combina header + unita' se presenti
+    # combine header + units if present
     headers_disp = []
     for k in range(max_cols):
         h = headers[k] if k < len(headers) else ""
@@ -550,15 +550,15 @@ def convert_with_csv(src: Path, max_preview_rows: int = 50) -> str:
         else: headers_disp.append(h)
 
     data_rows = rows[data_start:]
-    # taglia righe completamente vuote in coda
+    # cut completely empty rows at the end
     while data_rows and not any(data_rows[-1]):
         data_rows.pop()
 
-    parts.append(f"**Righe dati**: {len(data_rows)}  "
+    parts.append(f"**Data rows**: {len(data_rows)}  "
                  f"**Colonne**: {max_cols}  "
                  f"**Separatore**: `'{dialect.delimiter}'`\n")
 
-    # --- 3) statistica colonne numeriche ---
+    # --- 3) numeric column statistics ---
     stats = []
     for k in range(max_cols):
         nums = []
@@ -569,16 +569,16 @@ def convert_with_csv(src: Path, max_preview_rows: int = 50) -> str:
             stats.append((headers_disp[k], len(nums), min(nums),
                           sum(nums) / len(nums), max(nums)))
     if stats:
-        parts.append("\n## Statistica colonne numeriche\n")
-        parts.append("| Colonna | n | min | media | max |")
+        parts.append("\n## Numeric column statistics\n")
+        parts.append("| Column | n | min | mean | max |")
         parts.append("|---|---|---|---|---|")
         for h, n, mn, av, mx in stats:
             parts.append(f"| {h} | {n} | {mn:.6g} | {av:.6g} | {mx:.6g} |")
 
-    # --- 4) anteprima dati ---
+    # --- 4) data preview ---
     parts.append("\n## Dati")
     if len(data_rows) > max_preview_rows:
-        parts.append(f"_(mostro le prime {max_preview_rows} righe su "
+        parts.append(f"_(showing the first {max_preview_rows} rows of "
                      f"{len(data_rows)})_\n")
         show = data_rows[:max_preview_rows]
     else:
@@ -594,16 +594,16 @@ def convert_with_csv(src: Path, max_preview_rows: int = 50) -> str:
 
 
 # ----------------------------------------------------------------------------
-# Motore CODE: sorgenti di programmazione (e di config testuale)
-# Mette il contenuto in un blocco markdown ``` con linguaggio corretto.
+# CODE engine: programming sources (and text config)
+# Puts the content in a ``` markdown block with the correct language.
 # ----------------------------------------------------------------------------
 def convert_with_code(src: Path) -> str:
-    """Converte un file sorgente in Markdown:
-       - intestazione H1 col nome file e dimensione/righe
-       - blocco fenced code (```lang) col contenuto integrale
+    """Converts a source file to Markdown:
+       - H1 heading with the file name and size/lines
+       - fenced code block (```lang) with the full content
     """
     ext = src.suffix.lower()
-    # nomi speciali senza estensione (Dockerfile, Makefile, ...)
+    # special names without an extension (Dockerfile, Makefile, ...)
     name_l = src.name.lower()
     lang = (CODE_LANG.get(ext) or TEXT_DATA_LANG.get(ext) or "")
     if not lang:
@@ -614,7 +614,7 @@ def convert_with_code(src: Path) -> str:
         text = src.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         text = src.read_text(encoding="latin-1", errors="replace")
-    # protezione: se il file contiene ``` lo "scolpisco" con ` adatto
+    # protection: if the file contains ``` it is escaped with a suitable `
     fence = "```"
     while fence in text:
         fence += "`"
@@ -624,7 +624,7 @@ def convert_with_code(src: Path) -> str:
         f"# {src.name}",
         f"",
         f"**Linguaggio**: `{lang or '(testo)'}`  "
-        f"**Righe**: {n_lines}  **Dimensione**: {sz/1024:.1f} KB",
+        f"**Lines**: {n_lines}  **Dimensione**: {sz/1024:.1f} KB",
         f"",
         f"{fence}{lang}",
         text.rstrip(),
@@ -643,7 +643,7 @@ def convert_with_ipynb(src: Path) -> str:
     lang = (nb.get("metadata", {}).get("kernelspec", {}).get("language")
             or nb.get("metadata", {}).get("language_info", {}).get("name")
             or "python")
-    parts = [f"# {src.name}", "", f"**Notebook** (linguaggio: {lang})", ""]
+    parts = [f"# {src.name}", "", f"**Notebook** (language: {lang})", ""]
     for i, cell in enumerate(nb.get("cells", []), 1):
         ctype = cell.get("cell_type", "")
         src_lines = cell.get("source", [])
@@ -671,9 +671,9 @@ def convert_with_ipynb(src: Path) -> str:
                         if tp.strip():
                             parts.append(f"\n*Output:*\n```\n{tp.rstrip()}\n```")
                     if "image/png" in data:
-                        parts.append(f"\n*(output: immagine PNG embedded — non rinderizzata in Markdown)*")
+                        parts.append(f"\n*(output: embedded PNG image — not rendered in Markdown)*")
                 elif otype == "error":
-                    parts.append(f"\n*Errore:* `{out.get('ename','')}: {out.get('evalue','')}`")
+                    parts.append(f"\n*Error:* `{out.get('ename','')}: {out.get('evalue','')}`")
             parts.append("")
         elif ctype == "raw":
             parts.append(f"<!-- Cella {i}: raw -->\n```\n{src_text.rstrip()}\n```\n")
@@ -681,7 +681,7 @@ def convert_with_ipynb(src: Path) -> str:
 
 
 # ----------------------------------------------------------------------------
-# Motore EMAIL .eml -> markdown (header + corpo + allegati estratti)
+# .eml EMAIL engine -> markdown (headers + body + extracted attachments)
 # ----------------------------------------------------------------------------
 def convert_with_eml(src: Path, media_dirname: str = "media") -> tuple[str, Path]:
     from email import policy
@@ -699,7 +699,7 @@ def convert_with_eml(src: Path, media_dirname: str = "media") -> tuple[str, Path
 
     parts = [f"# {src.name}", ""]
     headers = ["From", "To", "Cc", "Bcc", "Subject", "Date", "Reply-To"]
-    parts.append("| Campo | Valore |")
+    parts.append("| Field | Value |")
     parts.append("|---|---|")
     for h in headers:
         v = msg.get(h)
@@ -720,12 +720,12 @@ def convert_with_eml(src: Path, media_dirname: str = "media") -> tuple[str, Path
             except Exception: pass
 
     if body_plain:
-        parts.append("## Corpo (testo)\n")
+        parts.append("## Body (text)\n")
         parts.append(body_plain.strip())
         parts.append("")
     elif body_html:
-        parts.append("## Corpo (HTML convertito)\n")
-        # mini converter HTML -> testo
+        parts.append("## Body (converted HTML)\n")
+        # mini HTML -> text converter
         try:
             from markitdown import MarkItDown
             import tempfile
@@ -740,7 +740,7 @@ def convert_with_eml(src: Path, media_dirname: str = "media") -> tuple[str, Path
     attachments = []
     for part in msg.iter_attachments():
         fname = part.get_filename() or f"attachment_{len(attachments)+1}"
-        # nome sicuro
+        # safe name
         safe = re.sub(r"[^A-Za-z0-9._-]+", "_", fname)
         try:
             payload = part.get_payload(decode=True)
@@ -751,7 +751,7 @@ def convert_with_eml(src: Path, media_dirname: str = "media") -> tuple[str, Path
 
     if attachments:
         parts.append("\n## Allegati\n")
-        parts.append("| Nome | Dimensione | Link |")
+        parts.append("| Name | Size | Link |")
         parts.append("|---|---|---|")
         for orig, safe, sz in attachments:
             parts.append(f"| {orig} | {sz/1024:.1f} KB | [{safe}]({asset_prefix}/{safe}) |")
@@ -760,7 +760,7 @@ def convert_with_eml(src: Path, media_dirname: str = "media") -> tuple[str, Path
 
 
 # ----------------------------------------------------------------------------
-# Motore ARCHIVE .zip -> markdown (lista file + converte ricorsivamente i contenuti)
+# .zip ARCHIVE engine -> markdown (file list + recursive conversion of the contents)
 # ----------------------------------------------------------------------------
 def convert_with_archive(src: Path, args=None,
                          media_dirname: str = "media",
@@ -775,26 +775,26 @@ def convert_with_archive(src: Path, args=None,
 
     parts = [f"# {src.name}", "", f"**Archive**: ZIP ({src.stat().st_size/1024/1024:.2f} MB)", ""]
     if not zipfile.is_zipfile(src):
-        parts.append("_(non e' uno ZIP valido)_")
+        parts.append("_(not a valid ZIP)_")
         return ("\n".join(parts), assets)
 
     with zipfile.ZipFile(src) as zf:
         infolist = zf.infolist()
-        parts.append(f"**File contenuti**: {len([i for i in infolist if not i.is_dir()])}")
+        parts.append(f"**Contained files**: {len([i for i in infolist if not i.is_dir()])}")
         parts.append("")
-        parts.append("| Path | Dimensione | Compresso |")
+        parts.append("| Path | Size | Compressed |")
         parts.append("|---|---|---|")
         for info in infolist:
             if info.is_dir(): continue
             parts.append(f"| `{info.filename}` | {info.file_size/1024:.1f} KB "
                          f"| {info.compress_size/1024:.1f} KB |")
-        # estraggo TUTTO in assets/_extracted/
+        # extract EVERYTHING into assets/_extracted/
         extract_dir = assets / "_extracted"
         extract_dir.mkdir(parents=True, exist_ok=True)
         zf.extractall(extract_dir)
 
     if _depth < max_depth and args is not None:
-        parts.append("\n## Contenuto dei file (convertito ricorsivamente)\n")
+        parts.append("\n## File contents (converted recursively)\n")
         for sub in sorted(extract_dir.rglob("*")):
             if not sub.is_file(): continue
             if sub.suffix.lower() not in ALL_SUPPORTED: continue
@@ -802,21 +802,21 @@ def convert_with_archive(src: Path, args=None,
                 sub_eng = choose_engine(sub, "auto")
                 parts.append(f"\n### {sub.relative_to(extract_dir).as_posix()}  "
                              f"`[{sub_eng}]`\n")
-                # ricicla convert_one (semplice) — rimanderebbe a un .md affianco
-                # qui invece estraiamo il testo "inline" senza scrivere .md per ogni sub
+                # reuses convert_one (simple) — it would write an .md alongside
+                # here we extract the text "inline" without writing an .md for each sub-file
                 inner_text = _inline_convert(sub, args)
-                # rientra di 1 livello di header per non sovrapporsi
+                # indent by 1 heading level so as not to overlap
                 inner_text = re.sub(r"^(#+) ", r"#\1 ", inner_text, flags=re.M)
                 parts.append(inner_text.strip())
             except Exception as e:
-                parts.append(f"_(non convertito: {type(e).__name__}: {e})_")
+                parts.append(f"_(not converted: {type(e).__name__}: {e})_")
 
     return ("\n".join(parts) + "\n", assets)
 
 
 def _inline_convert(sub: Path, args) -> str:
-    """Converte un sotto-file in stringa Markdown senza scrivere il .md su disco.
-       Usato dall'archive engine per inserire i contenuti nel md padre."""
+    """Converts a sub-file to a Markdown string without writing the .md to disk.
+       Used by the archive engine to insert the contents into the parent md."""
     eng = choose_engine(sub, "auto")
     if eng == "code":     return convert_with_code(sub)
     if eng == "text_data": return convert_with_code(sub)
@@ -826,15 +826,15 @@ def _inline_convert(sub: Path, args) -> str:
     if eng == "markitdown": return convert_with_markitdown(sub)
     if eng == "passthrough":
         return f"```\n{sub.read_text(encoding='utf-8', errors='replace')}\n```"
-    return f"_(estensione {sub.suffix} non gestita in inline)_"
+    return f"_(estensione {sub.suffix} not handled inline)_"
 
 
 # ----------------------------------------------------------------------------
-# Motore URL -> scarica e converti
+# URL engine -> download and convert
 # ----------------------------------------------------------------------------
 def convert_with_url(url: str, dest_dir: Path, args) -> tuple[str, Path, Path]:
-    """Scarica una URL e la converte. Ritorna (markdown, assets, output_md_path).
-       Il file scaricato viene salvato in dest_dir/<safe_name>.<ext>."""
+    """Downloads a URL and converts it. Returns (markdown, assets, output_md_path).
+       The downloaded file is saved in dest_dir/<safe_name>.<ext>."""
     import urllib.request, urllib.parse, tempfile, mimetypes
     parsed = urllib.parse.urlparse(url)
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", parsed.netloc + parsed.path) or "download"
@@ -844,56 +844,56 @@ def convert_with_url(url: str, dest_dir: Path, args) -> tuple[str, Path, Path]:
         data = r.read()
         ctype = r.headers.get("Content-Type", "").split(";")[0].strip()
     ext = mimetypes.guess_extension(ctype) or ".bin"
-    # se l'URL ha gia' estensione esplicita, preferiscila
+    # if the URL already has an explicit extension, prefer it
     url_ext = Path(parsed.path).suffix
     if url_ext.lower() in ALL_SUPPORTED:
         ext = url_ext
-    # evita doppie estensioni se 'safe' termina gia' con 'ext'
+    # avoid double extensions if 'safe' already ends with 'ext'
     if safe.lower().endswith(ext.lower()):
         out_file = dest_dir / safe
     else:
         out_file = dest_dir / f"{safe}{ext}"
     out_file.write_bytes(data)
-    # ora converti il file
+    # now convert the file
     if ext.lower() in ALL_SUPPORTED:
         eng = choose_engine(out_file, "auto")
-        # usiamo convert_one ma in modo da NON sovrascrivere il file scaricato
-        # (chiamiamo le funzioni dirette)
+        # use convert_one but so as NOT to overwrite the downloaded file
+        # (calling the functions directly)
         if eng == "html" or out_file.suffix.lower() in {".html", ".htm"}:
             text = convert_with_markitdown(out_file)
             return text, dest_dir, out_file.with_suffix(".md")
-        # delega al convert_one tramite args fittizio
+        # delegate to convert_one through dummy args
         from types import SimpleNamespace
         new_args = SimpleNamespace(**vars(args)) if hasattr(args, "__dict__") else args
         new_args.overwrite = True
         info = convert_one(out_file, new_args)
         return (Path(info["out"]).read_text(encoding="utf-8") if info["ok"] else
-                f"_(conversione fallita: {info.get('note')})_",
+                f"_(conversion failed: {info.get('note')})_",
                 dest_dir, Path(info["out"]))
     else:
-        # contenuto sconosciuto: blocco code
+        # unknown content: code block
         try: txt = data.decode("utf-8", errors="replace")
-        except Exception: txt = f"_(contenuto binario, {len(data)} bytes)_"
-        return (f"# Download da {url}\n\n```\n{txt[:5000]}\n```\n",
+        except Exception: txt = f"_(binary content, {len(data)} bytes)_"
+        return (f"# Downloaded from {url}\n\n```\n{txt[:5000]}\n```\n",
                 dest_dir, out_file.with_suffix(".md"))
 
 
 # ----------------------------------------------------------------------------
-# Motore EBOOK proprietario (.mobi, .azw3, .djvu, .fb2): richiede calibre
+# Proprietary EBOOK engine (.mobi, .azw3, .djvu, .fb2): requires calibre
 # ----------------------------------------------------------------------------
 def convert_with_ebook(src: Path) -> str:
-    """Converte e-book proprietari via 'ebook-convert' di Calibre, se installato."""
+    """Converts proprietary e-books via Calibre's 'ebook-convert', if installed."""
     exe = shutil.which("ebook-convert")
     if not exe:
         return (f"# {src.name}\n\n"
-                f"**Tipo**: e-book ({src.suffix})\n\n"
-                f"⚠ Non posso convertirlo automaticamente: serve **Calibre** "
-                f"(https://calibre-ebook.com/download). Installalo e riprova.\n"
-                f"Comando manuale alternativo:\n"
+                f"**Type**: e-book ({src.suffix})\n\n"
+                f"⚠ Cannot convert it automatically: **Calibre** is needed "
+                f"(https://calibre-ebook.com/download). Install it and try again.\n"
+                f"Alternative manual command:\n"
                 f"```\n"
                 f"ebook-convert \"{src.name}\" \"{src.stem}.epub\"\n"
                 f"```\n"
-                f"poi converti l'.epub con tomd2.\n")
+                f"then convert the .epub with tomd2.\n")
     import tempfile, subprocess as sp
     tmp = Path(tempfile.mkdtemp(prefix="ebook_"))
     try:
@@ -905,61 +905,61 @@ def convert_with_ebook(src: Path) -> str:
 
 
 # ----------------------------------------------------------------------------
-# Motore AUDIO / VIDEO: trascrizione con openai-whisper (locale, gratis)
+# AUDIO / VIDEO engine: transcription with openai-whisper (local, free)
 # ----------------------------------------------------------------------------
 def convert_with_media(src: Path, model: str = "base") -> str:
-    """Trascrive audio/video con openai-whisper (locale).
-       Richiede: pip install openai-whisper + ffmpeg installato."""
+    """Transcribes audio/video with openai-whisper (local).
+       Requires: pip install openai-whisper + ffmpeg installed."""
     try:
         import whisper
     except ImportError:
         return (f"# {src.name}\n\n"
                 f"**Tipo**: {('audio' if src.suffix.lower() in AUDIO_EXT else 'video')} "
                 f"({src.suffix})\n\n"
-                f"⚠ Non posso trascrivere: manca **openai-whisper**. Installa:\n"
+                f"⚠ Cannot transcribe: **openai-whisper** is missing. Install:\n"
                 f"```\n"
                 f"pip install -U openai-whisper\n"
                 f"```\n"
-                f"e assicurati di avere **ffmpeg** nel PATH (https://ffmpeg.org).\n")
+                f"and make sure **ffmpeg** is on the PATH (https://ffmpeg.org).\n")
     if not shutil.which("ffmpeg"):
         return (f"# {src.name}\n\n"
-                f"⚠ openai-whisper trovato, ma manca **ffmpeg** nel PATH "
+                f"⚠ openai-whisper found, but **ffmpeg** is missing from the PATH "
                 f"(https://ffmpeg.org/download.html).\n")
-    print(f"  Whisper: carico modello '{model}' (prima volta scarica ~150MB)...")
+    print(f"  Whisper: loading model '{model}' (the first time it downloads ~150MB)...")
     m = whisper.load_model(model)
-    print(f"  Whisper: trascrivo {src.name} ...")
+    print(f"  Whisper: transcribing {src.name} ...")
     res = m.transcribe(str(src), verbose=False)
     parts = [f"# {src.name}", "",
-             f"**Trascrizione automatica** (Whisper, modello `{model}`, "
+             f"**Automatic transcription** (Whisper, model `{model}`, "
              f"lingua: {res.get('language','?')})", ""]
     for seg in res.get("segments", []):
         t0 = seg["start"]; t1 = seg["end"]
         def _ts(s): return f"{int(s//60):02d}:{int(s%60):02d}"
         parts.append(f"`[{_ts(t0)}-{_ts(t1)}]` {seg['text'].strip()}")
     parts.append("")
-    parts.append("## Testo completo\n")
+    parts.append("## Full text\n")
     parts.append(res.get("text", "").strip())
     return "\n".join(parts) + "\n"
 
 
 # ----------------------------------------------------------------------------
-# Motore 2 (PRIMARIO per PDF): pymupdf4llm
+# Engine 2 (PRIMARY for PDFs): pymupdf4llm
 #
 # Strategia:
-#  - to_markdown(page_chunks=True): otteniamo testo+tabelle in markdown e
-#    metadati per pagina (immagini estratte, conteggi, ecc.).
-#  - write_images=True: pymupdf4llm salva le immagini incorporate e i grafici
-#    rilevati come PNG dentro assets/.
-#  - In aggiunta renderizziamo come PNG ad alta risoluzione TUTTE le pagine
-#    con grafica vettoriale (drawings): cosi' i diagrammi di flusso, anche se
-#    pymupdf4llm li approssima male in Markdown, restano disponibili come
-#    immagine (un'IA multimodale li legge).
-#  - Il render di pagina viene INSERITO nel .md proprio nella sezione di quella
-#    pagina, in modo che testo + immagine di pagina vivano vicini.
+#  - to_markdown(page_chunks=True): we get text+tables in markdown and
+#    per-page metadata (extracted images, counts, etc.).
+#  - write_images=True: pymupdf4llm saves the embedded images and detected
+#    charts as PNGs inside assets/.
+#  - In addition we render as high-resolution PNGs ALL the pages
+#    with vector graphics (drawings): so flow diagrams, even if
+#    pymupdf4llm approximates them poorly in Markdown, remain available as
+#    image (a multimodal AI can read them).
+#  - The page render is INSERTED in the .md right in the section of that
+#    page, so that text + page image live close together.
 # ----------------------------------------------------------------------------
 def _pages_with_vector_graphics(src: Path, min_drawings: int = 3) -> set[int]:
-    """Ritorna l'insieme delle pagine (1-based) con >= min_drawings drawings
-       vettoriali (candidate a contenere diagrammi/flowchart)."""
+    """Returns the set of pages (1-based) with >= min_drawings vector
+       drawings (candidates for containing diagrams/flowcharts)."""
     import fitz
     doc = fitz.open(str(src))
     out = set()
@@ -975,8 +975,8 @@ def _pages_with_vector_graphics(src: Path, min_drawings: int = 3) -> set[int]:
 
 def _render_pages_to_png(src: Path, assets: Path, pages_1based: set[int],
                          dpi: int = 200) -> dict[int, str]:
-    """Renderizza le pagine indicate come PNG dentro assets/_pages/.
-       Ritorna mapping pagina_1based -> nomefile (basename) dentro _pages."""
+    """Renders the given pages as PNGs inside assets/_pages/.
+       Returns a mapping page_1based -> file name (basename) inside _pages."""
     import fitz
     if not pages_1based:
         return {}
@@ -1002,11 +1002,11 @@ def convert_with_pymupdf4llm(src: Path, page_images: bool,
                              vector_threshold: int,
                              media_dirname: str = "media",
                              lean_md: bool = False) -> tuple[str, Path]:
-    """Converte un PDF in Markdown con pymupdf4llm.
-       Crea media/<stem>/ con immagini estratte e (opz.) immagini di pagina.
+    """Converts a PDF to Markdown with pymupdf4llm.
+       Creates media/<stem>/ with extracted images and (optionally) page images.
 
-       lean_md=True: niente <details><summary>, link immagine compatti.
-                     Riduce boilerplate per IA (suggerito da Gemini)."""
+       lean_md=True: no <details><summary>, compact image links.
+                     Reduces boilerplate for AI (suggested by Gemini)."""
     import pymupdf4llm, tempfile, pymupdf
 
     stem = src.stem
@@ -1015,12 +1015,12 @@ def convert_with_pymupdf4llm(src: Path, page_images: bool,
         shutil.rmtree(assets)
     assets.mkdir(parents=True, exist_ok=True)
 
-    # --- pymupdf4llm BUG workaround: i nomi delle immagini vengono normalizzati
-    # (spazi -> underscore) ma poi cercati col nome originale. Per evitarlo,
-    # lavoriamo in una directory temporanea col PDF rinominato senza spazi e
-    # senza caratteri "esotici", poi spostiamo i PNG nella cartella assets reale.
-    # In aggiunta usiamo un Document aperto, cosi' pymupdf4llm vede il nome
-    # canonicale (es. 'doc.pdf') per costruire i path immagine.
+    # --- pymupdf4llm BUG workaround: image names are normalized
+    # (spaces -> underscores) but then looked up with the original name. To avoid this,
+    # we work in a temporary directory with the PDF renamed without spaces and
+    # without "exotic" characters, then move the PNGs to the real assets folder.
+    # In addition we use an open Document, so pymupdf4llm sees the
+    # canonical name (e.g. 'doc.pdf') when building image paths.
     safe_stem = re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_") or "doc"
     tmpdir = Path(tempfile.mkdtemp(prefix="pmpdf4llm_"))
     try:
@@ -1040,13 +1040,13 @@ def convert_with_pymupdf4llm(src: Path, page_images: bool,
                 image_format="png",
                 dpi=page_image_dpi,
                 show_progress=True,
-                table_strategy="lines_strict",  # evita falsi positivi su footer/header
+                table_strategy="lines_strict",  # avoids false positives on footers/headers
             )
         finally:
             doc.close()
 
-        # Sposta tutte le immagini prodotte in `assets`, rinominandole
-        # per usare il vero stem (con spazi reintrodotti come '_').
+        # Move all the produced images to `assets`, renaming them
+        # to use the real stem (with spaces reintroduced as '_').
         for f in tmp_assets.iterdir():
             if f.is_file():
                 shutil.move(str(f), str(assets / f.name))
@@ -1055,25 +1055,25 @@ def convert_with_pymupdf4llm(src: Path, page_images: bool,
 
     asset_prefix = f"{media_dirname}/{stem}"
 
-    # --- 2) page-image "garanzia diagrammi" per pagine con grafica vettoriale ---
+    # --- 2) "diagram guarantee" page images for pages with vector graphics ---
     page_img_map: dict[int, str] = {}
     if page_images:
         vec_pages = _pages_with_vector_graphics(src, min_drawings=vector_threshold)
         if vec_pages:
-            print(f"  Rendering pagine vettoriali ({len(vec_pages)}/{_pdf_pages(src)}) "
-                  f"come PNG (dpi={page_image_dpi}) ...")
+            print(f"  Rendering vector pages ({len(vec_pages)}/{_pdf_pages(src)}) "
+                  f"as PNG (dpi={page_image_dpi}) ...")
             page_img_map = _render_pages_to_png(
                 src, assets, vec_pages, dpi=page_image_dpi)
 
-    # --- 3) apro il PDF anche con pymupdf per il fallback testo ---
-    # (per pagine in cui pymupdf4llm estrae poco testo ma il PDF ne ha)
+    # --- 3) open the PDF with pymupdf too, for the text fallback ---
+    # (for pages where pymupdf4llm extracts little text but the PDF has some)
     import pymupdf as _pdf
     raw_doc = _pdf.open(str(src))
 
-    # lean_md è già parametro della funzione (default False)
+    # lean_md is already a function parameter (default False)
     opt_lean_md = lean_md
 
-    # --- 4) ricomponiamo il Markdown pagina per pagina ---
+    # --- 4) rebuild the Markdown page by page ---
     parts: list[str] = []
     n_pages = len(page_chunks)
     for idx, chunk in enumerate(page_chunks, start=1):
@@ -1088,11 +1088,11 @@ def convert_with_pymupdf4llm(src: Path, page_images: bool,
         text = chunk.get("text", "") if isinstance(chunk, dict) else str(chunk)
         text = _rewrite_image_paths(text, asset_prefix)
 
-        # ===== FALLBACK TESTO (fix Gemini: formule diventate immagini) =====
-        # Se la pagina del PDF originale ha molto piu' testo di quello che
-        # pymupdf4llm ci ha dato, affianchiamo l'estrazione raw come backup.
-        # Soglia: se il chunk md ha meno di 50% del testo raw (di una pagina con
-        # almeno 200 caratteri raw), aggiungiamo una sezione "testo originale".
+        # ===== TEXT FALLBACK (Gemini fix: formulas turned into images) =====
+        # If the page of the original PDF has much more text than
+        # pymupdf4llm gave us, add the raw extraction alongside as a backup.
+        # Threshold: if the md chunk has less than 50% of the raw text (of a page with
+        # at least 200 raw characters), we add an "original text" section.
         try:
             if 0 < page_no - 1 < raw_doc.page_count:
                 raw_text = raw_doc[page_no - 1].get_text("text").strip()
@@ -1100,7 +1100,7 @@ def convert_with_pymupdf4llm(src: Path, page_images: bool,
                 raw_text = ""
         except Exception:
             raw_text = ""
-        # rimuovo i blocchi image markdown dal text per misurarne il "vero" contenuto
+        # remove the markdown image blocks from the text to measure its "true" content
         text_only = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)
         text_only_chars = len(re.sub(r"\s+", "", text_only))
         raw_chars = len(re.sub(r"\s+", "", raw_text))
@@ -1108,27 +1108,27 @@ def convert_with_pymupdf4llm(src: Path, page_images: bool,
                           text_only_chars < raw_chars * 0.5)
 
         parts.append(f"\n\n<!-- ===== Pagina {page_no} di {n_pages} ===== -->\n")
-        # link al render della pagina (se presente) PRIMA del testo
+        # link to the page render (if present) BEFORE the text
         if page_no in page_img_map:
             rel = f"{asset_prefix}/_pages/{page_img_map[page_no]}"
             if opt_lean_md:
-                # versione "lean": link compatto, senza <details>
+                # "lean" version: compact link, no <details>
                 parts.append(f"\n![pagina {page_no}]({rel})\n")
             else:
                 parts.append(
                     f"\n<details><summary>"
-                    f"Pagina {page_no} (immagine ad alta risoluzione — garanzia diagrammi)"
+                    f"Pagina {page_no} (high-resolution image — diagram guarantee)"
                     f"</summary>\n\n"
                     f"![pagina {page_no}]({rel})\n\n"
                     f"</details>\n"
                 )
         parts.append("\n" + text.strip() + "\n")
-        # Se serve il fallback, aggiungo il testo raw del PDF (per non perdere
-        # formule/numeri intrappolati in immagini)
+        # If the fallback is needed, add the raw PDF text (so as not to lose
+        # formulas/numbers trapped in images)
         if needs_fallback:
-            parts.append(f"\n<!-- testo originale del PDF (fallback formule/dati): -->\n")
-            parts.append(f"\n<details><summary>Testo grezzo pagina {page_no} "
-                         f"(per IA: contiene le formule che pymupdf4llm ha catturato come immagini)"
+            parts.append(f"\n<!-- original PDF text (formula/data fallback): -->\n")
+            parts.append(f"\n<details><summary>Raw text of page {page_no} "
+                         f"(for AI: contains the formulas pymupdf4llm captured as images)"
                          f"</summary>\n\n```\n{raw_text}\n```\n</details>\n")
     raw_doc.close()
 
@@ -1147,19 +1147,19 @@ def _pdf_pages(src: Path) -> int:
 
 
 # ----------------------------------------------------------------------------
-# Rilevamento PDF "scansionato + OCR" (es. libri da Anna's Archive, archive.org)
+# Detection of "scanned + OCR" PDFs (e.g. books from online archives)
 # ----------------------------------------------------------------------------
 def _is_scanned_ocr_pdf(src: Path,
                         page_coverage_threshold: float = 0.5,
                         min_pages_scanned_ratio: float = 0.6,
                         min_text_chars_per_page: int = 100) -> bool:
-    """Ritorna True se il PDF e' una SCANSIONE con OCR sottostante:
-       - la maggior parte delle pagine ha un'immagine raster che copre
-         >= page_coverage_threshold dell'area della pagina;
-       - ma c'e' anche testo selezionabile (> min_text_chars_per_page).
-       In tal caso pymupdf4llm risulta inefficace (vede ogni pagina come
-       'una grande figura' e salva la pagina come PNG senza estrarre il testo).
-       Conviene allora usare l'estrazione diretta del testo via fitz.get_text.
+    """Returns True if the PDF is a SCAN with underlying OCR:
+       - most pages have a raster image covering
+         >= page_coverage_threshold of the page area;
+       - but there is also selectable text (> min_text_chars_per_page).
+       In that case pymupdf4llm is ineffective (it sees each page as
+       'one big figure' and saves the page as a PNG without extracting the text).
+       It is better to extract the text directly via fitz.get_text.
     """
     import fitz
     doc = fitz.open(str(src))
@@ -1172,11 +1172,11 @@ def _is_scanned_ocr_pdf(src: Path,
         for page in doc:
             page_area = page.rect.width * page.rect.height
             if page_area <= 0: continue
-            # area totale delle immagini raster nella pagina
+            # total area of the raster images on the page
             img_area = 0
             for img in page.get_images(full=True):
                 xref = img[0]
-                # bbox via get_image_rects (piu' affidabile)
+                # bbox via get_image_rects (more reliable)
                 try:
                     rects = page.get_image_rects(xref)
                     for r in rects:
@@ -1194,15 +1194,15 @@ def _is_scanned_ocr_pdf(src: Path,
 
 
 # ----------------------------------------------------------------------------
-# Motore "OCR-scan PDF": preserva il TESTO OCR e mostra ogni pagina come PNG
+# "OCR-scan PDF" engine: keeps the OCR TEXT and shows each page as a PNG
 # ----------------------------------------------------------------------------
 def convert_with_ocr_scan(src: Path, page_image_dpi: int = 150,
                           media_dirname: str = "media") -> tuple[str, Path]:
-    """Per i PDF scansionati+OCR (libri da Anna's Archive, archive.org, ecc.):
-       - testo estratto direttamente con fitz.get_text (preserva l'OCR)
-       - ogni pagina renderizzata come PNG (backup visivo, per figure/formule)
-       - NON estrae le immagini incorporate (sono solo le pagine stesse,
-         occupano centinaia di MB e sono ridondanti rispetto alle page-image).
+    """For scanned+OCR PDFs (books from online archives, archive.org, etc.):
+       - text extracted directly with fitz.get_text (keeps the OCR)
+       - each page rendered as a PNG (visual backup, for figures/formulas)
+       - does NOT extract the embedded images (they are just the pages themselves,
+         take hundreds of MB and are redundant with the page images).
     """
     import fitz
 
@@ -1221,22 +1221,22 @@ def convert_with_ocr_scan(src: Path, page_image_dpi: int = 150,
     n = doc.page_count
     for i in range(n):
         page = doc[i]
-        # 1) testo OCR estratto dal PDF
+        # 1) OCR text extracted from the PDF
         text = page.get_text("text").strip()
-        # 2) page-image come backup visivo
+        # 2) page image as visual backup
         pix = page.get_pixmap(matrix=mat, alpha=False)
         png_name = f"page_{i+1:04d}.png"
         pix.save(str(pages_dir / png_name))
         parts.append(f"\n\n<!-- ===== Pagina {i+1} di {n} ===== -->\n")
         parts.append(
-            f"\n<details><summary>Pagina {i+1} (immagine scansione originale)"
+            f"\n<details><summary>Pagina {i+1} (original scan image)"
             f"</summary>\n\n"
             f"![pagina {i+1}]({asset_prefix}/_pages/{png_name})\n\n"
             f"</details>\n")
         if text:
             parts.append("\n" + text + "\n")
         else:
-            parts.append("\n_(testo non estratto da questa pagina — usa l'immagine sopra)_\n")
+            parts.append("\n_(text not extracted from this page — use the image above)_\n")
     doc.close()
 
     full_md = "".join(parts).strip() + "\n"
@@ -1244,14 +1244,14 @@ def convert_with_ocr_scan(src: Path, page_image_dpi: int = 150,
 
 
 # ----------------------------------------------------------------------------
-# Motore Tesseract: OCR VELOCE e locale per immagini e PDF scansionati
-# SENZA testo. Secondi invece delle ore di marker (che resta come opzione
-# per la massima qualita' su formule/tabelle complesse).
+# Tesseract engine: FAST local OCR for images and scanned PDFs
+# WITHOUT text. Seconds instead of the hours of marker (which stays as an option
+# for maximum quality on complex formulas/tables).
 # ----------------------------------------------------------------------------
 def _find_tesseract() -> tuple[str | None, str | None]:
-    """Ritorna (path tesseract.exe, tessdata_dir) oppure (None, None).
-       tessdata_dir punta alla cartella utente se contiene ita.traineddata
-       (installata li' quando Program Files non e' scrivibile)."""
+    """Returns (tesseract.exe path, tessdata_dir) or (None, None).
+       tessdata_dir points to the user folder if it contains ita.traineddata
+       (installed there when Program Files is not writable)."""
     import os
     exe = shutil.which("tesseract")
     if not exe:
@@ -1260,7 +1260,7 @@ def _find_tesseract() -> tuple[str | None, str | None]:
             exe = str(cand)
     if not exe:
         return None, None
-    # tessdata: preferisci la cartella utente se ha l'italiano
+    # tessdata: prefer the user folder if it has Italian
     user_td = Path(os.environ.get("LOCALAPPDATA", "")) / "tessdata"
     if (user_td / "ita.traineddata").exists():
         return exe, str(user_td)
@@ -1268,19 +1268,19 @@ def _find_tesseract() -> tuple[str | None, str | None]:
 
 
 def _tesseract_ocr_pil(img, lang: str = "ita+eng") -> str:
-    """OCR di un'immagine PIL via pytesseract. Ritorna testo (o '')."""
+    """OCR of a PIL image via pytesseract. Returns text (or '')."""
     import os
     import pytesseract
     exe, tessdata = _find_tesseract()
     if not exe:
         raise RuntimeError(
-            "Tesseract non installato. Installa con: "
+            "Tesseract is not installed. Install with: "
             "winget install --id UB-Mannheim.TesseractOCR -e")
     pytesseract.pytesseract.tesseract_cmd = exe
     if tessdata:
-        # TESSDATA_PREFIX e' piu' affidabile di --tessdata-dir (quoting fragile)
+        # TESSDATA_PREFIX is more reliable than --tessdata-dir (fragile quoting)
         os.environ["TESSDATA_PREFIX"] = tessdata
-    # se manca ita, degrada a eng senza errori
+    # if ita is missing, degrade to eng without errors
     try:
         return pytesseract.image_to_string(img, lang=lang)
     except Exception:
@@ -1289,9 +1289,9 @@ def _tesseract_ocr_pil(img, lang: str = "ita+eng") -> str:
 
 def convert_with_ocr_image(src: Path, media_dirname: str = "media",
                            lang: str = "ita+eng") -> tuple[str, Path]:
-    """Immagine -> Markdown: OCR veloce con Tesseract + immagine linkata.
-       Se Tesseract manca, produce comunque un .md con l'immagine e un avviso
-       (nessun crash)."""
+    """Image -> Markdown: fast OCR with Tesseract + linked image.
+       If Tesseract is missing, still produces an .md with the image and a warning
+       (no crash)."""
     from PIL import Image
 
     stem = src.stem
@@ -1301,7 +1301,7 @@ def convert_with_ocr_image(src: Path, media_dirname: str = "media",
     assets.mkdir(parents=True, exist_ok=True)
     asset_prefix = f"{media_dirname}/{stem}"
 
-    # copia l'immagine negli assets (cosi' il .md e' autosufficiente)
+    # copy the image to the assets (so the .md is self-sufficient)
     dest_img = assets / src.name
     shutil.copyfile(src, dest_img)
 
@@ -1313,13 +1313,13 @@ def convert_with_ocr_image(src: Path, media_dirname: str = "media",
             img = img.convert("RGB")
         text = _tesseract_ocr_pil(img, lang=lang).strip()
         if text:
-            parts += ["## Testo estratto (OCR Tesseract)", "", text, ""]
+            parts += ["## Extracted text (Tesseract OCR)", "", text, ""]
         else:
-            parts += ["_(nessun testo rilevato nell'immagine)_", ""]
+            parts += ["_(no text detected in the image)_", ""]
     except RuntimeError as e:
-        parts += [f"⚠ OCR non disponibile: {e}", ""]
+        parts += [f"⚠ OCR not available: {e}", ""]
     except Exception as e:
-        parts += [f"⚠ OCR fallito ({type(e).__name__}: {e}) — resta l'immagine sopra.", ""]
+        parts += [f"⚠ OCR failed ({type(e).__name__}: {e}) — the image above remains.", ""]
 
     return "\n".join(parts), assets
 
@@ -1327,9 +1327,9 @@ def convert_with_ocr_image(src: Path, media_dirname: str = "media",
 def _is_scanned_no_text_pdf(src: Path,
                             page_coverage_threshold: float = 0.5,
                             min_pages_scanned_ratio: float = 0.6) -> bool:
-    """True se il PDF e' una scansione SENZA testo selezionabile:
-       pagine coperte da raster ma quasi nessun testo estraibile.
-       (Il caso 'scansione CON OCR' e' gestito da _is_scanned_ocr_pdf.)"""
+    """True if the PDF is a scan WITHOUT selectable text:
+       pages covered by raster but almost no extractable text.
+       (The 'scan WITH OCR' case is handled by _is_scanned_ocr_pdf.)"""
     import fitz
     doc = fitz.open(str(src))
     try:
@@ -1353,7 +1353,7 @@ def _is_scanned_no_text_pdf(src: Path,
                 scanned += 1
             text_chars += len(page.get_text("text").strip())
         return (scanned / n >= min_pages_scanned_ratio
-                and text_chars < n * 50)  # quasi zero testo
+                and text_chars < n * 50)  # almost no text
     finally:
         doc.close()
 
@@ -1361,9 +1361,9 @@ def _is_scanned_no_text_pdf(src: Path,
 def convert_with_ocr_tesseract_pdf(src: Path, page_image_dpi: int = 200,
                                    media_dirname: str = "media",
                                    lang: str = "ita+eng") -> tuple[str, Path]:
-    """PDF scansionato SENZA OCR -> Markdown, con Tesseract pagina per pagina.
-       Molto piu' veloce di marker su CPU (secondi/pagina invece di minuti).
-       Ogni pagina: testo OCR + immagine della pagina come backup visivo."""
+    """Scanned PDF WITHOUT OCR -> Markdown, with Tesseract page by page.
+       Much faster than marker on CPU (seconds/page instead of minutes).
+       Each page: OCR text + page image as visual backup."""
     import fitz
     from PIL import Image
     import io as _io
@@ -1381,13 +1381,13 @@ def convert_with_ocr_tesseract_pdf(src: Path, page_image_dpi: int = 200,
     n = doc.page_count
     mat = fitz.Matrix(page_image_dpi / 72, page_image_dpi / 72)
     parts: list[str] = []
-    print(f"  OCR Tesseract su {n} pagine (dpi={page_image_dpi}) ...")
+    print(f"  Tesseract OCR on {n} pages (dpi={page_image_dpi}) ...")
     for i in range(n):
         page = doc[i]
         pix = page.get_pixmap(matrix=mat, alpha=False)
         png_name = f"page_{i+1:04d}.png"
         pix.save(str(pages_dir / png_name))
-        # OCR sul rendering appena fatto (senza ri-leggere da disco)
+        # OCR on the render just made (without reading from disk again)
         img = Image.open(_io.BytesIO(pix.tobytes("png")))
         try:
             text = _tesseract_ocr_pil(img, lang=lang).strip()
@@ -1396,12 +1396,12 @@ def convert_with_ocr_tesseract_pdf(src: Path, page_image_dpi: int = 200,
             raise RuntimeError(str(e))
         parts.append(f"\n\n<!-- ===== Pagina {i+1} di {n} ===== -->\n")
         parts.append(
-            f"\n<details><summary>Pagina {i+1} (immagine scansione)"
+            f"\n<details><summary>Pagina {i+1} (scan image)"
             f"</summary>\n\n![pagina {i+1}]({asset_prefix}/_pages/{png_name})\n\n"
             f"</details>\n")
         parts.append("\n" + (text if text else
-                     "_(nessun testo rilevato in questa pagina)_") + "\n")
-        # progress leggibile da CLI e GUI
+                     "_(no text detected on this page)_") + "\n")
+        # progress readable by CLI and GUI
         print(f"  OCR: {int((i+1)*100/n)}% ({i+1}/{n})", flush=True)
     doc.close()
 
@@ -1411,16 +1411,16 @@ def convert_with_ocr_tesseract_pdf(src: Path, page_image_dpi: int = 200,
 
 
 # ----------------------------------------------------------------------------
-# Motore AI-PACK: PDF pieni di immagini -> .md COMPATTO ottimizzato per le IA.
+# AI-PACK engine: image-heavy PDFs -> COMPACT .md optimized for AI.
 #
-# Problema: slide fotografiche (astronomia, medicina, arte...) producono md +
-# PNG giganteschi (centinaia di MB) che nessuna chat IA accetta.
-# Soluzione: UNA immagine WebP per pagina, qualita' ~70, lato max 1568 px
-# (la risoluzione massima che Claude/GPT usano internamente: piu' grande =
-# peso sprecato, l'IA la riduce comunque). Il testo della pagina (layer PDF
-# + OCR Tesseract opzionale sulle pagine mute) sta accanto all'immagine.
-# Riduzione tipica: 10-20x rispetto all'originale, zero perdita di
-# informazione utile per l'IA.
+# Problem: photographic slides (astronomy, medicine, art...) produce md +
+# giant PNGs (hundreds of MB) that no AI chat accepts.
+# Solution: ONE WebP image per page, quality ~70, longest side 1568 px
+# (the maximum resolution Claude/GPT use internally: larger =
+# wasted weight, the AI shrinks it anyway). The page text (PDF layer
+# + optional Tesseract OCR on silent pages) sits next to the image.
+# Typical reduction: 10-20x compared with the original, no loss of
+# information useful to the AI.
 # ----------------------------------------------------------------------------
 def convert_with_ai_pack(src: Path, media_dirname: str = "media",
                          quality: int = 70, max_side: int = 1568,
@@ -1442,16 +1442,16 @@ def convert_with_ai_pack(src: Path, media_dirname: str = "media",
     doc = fitz.open(str(src))
     n = doc.page_count
     parts: list[str] = [
-        f"<!-- AI-PACK: 1 immagine WebP q{quality} max{max_side}px per pagina, "
-        f"testo integrale accanto. Ottimizzato per lettura da IA. -->\n"
+        f"<!-- AI-PACK: 1 WebP image q{quality} max{max_side}px per page, "
+        f"full text alongside. Optimized for reading by AI. -->\n"
     ]
     tot_bytes = 0
-    print(f"  AI-pack: {n} pagine -> WebP q{quality}, lato max {max_side}px ...")
+    print(f"  AI-pack: {n} pages -> WebP q{quality}, longest side {max_side}px ...")
     for i in range(n):
         page = doc[i]
-        # DPI dinamico: rendo la pagina in modo che il lato lungo ~ max_side
+        # Dynamic DPI: render the page so the long side ~ max_side
         rect = page.rect
-        long_side_pt = max(rect.width, rect.height)     # in punti (1/72")
+        long_side_pt = max(rect.width, rect.height)     # in points (1/72")
         zoom = (max_side / long_side_pt) if long_side_pt > 0 else 2.0
         pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
         img = Image.open(_io.BytesIO(pix.tobytes("png")))
@@ -1460,13 +1460,13 @@ def convert_with_ai_pack(src: Path, media_dirname: str = "media",
         img.save(str(webp_path), "WEBP", quality=quality, method=6)
         tot_bytes += webp_path.stat().st_size
 
-        # testo: layer PDF, con OCR di riserva sulle pagine mute
+        # text: PDF layer, with backup OCR on silent pages
         text = page.get_text("text").strip()
         if not text and ocr_fallback:
             try:
                 text = _tesseract_ocr_pil(img, lang=lang).strip()
                 if text:
-                    text = "*(testo via OCR)*\n\n" + text
+                    text = "*(text via OCR)*\n\n" + text
             except Exception:
                 pass
 
@@ -1481,31 +1481,31 @@ def convert_with_ai_pack(src: Path, media_dirname: str = "media",
 
     full_md = "".join(parts).strip() + "\n"
     full_md = _fix_charset_mojibake(full_md)
-    print(f"  AI-pack completato: immagini totali {tot_bytes/1024/1024:.1f} MB")
+    print(f"  AI-pack complete: total images {tot_bytes/1024/1024:.1f} MB")
     return full_md, assets
 
 
 # ----------------------------------------------------------------------------
-# Motore 3 (OPZIONALE): marker — solo per PDF scansionati o casi limite.
-# Lento su CPU senza GPU. Supporta --block-size per evitare OOM.
+# Engine 3 (OPTIONAL): marker — only for scanned PDFs or edge cases.
+# Slow on CPU without a GPU. Supports --block-size to avoid OOM.
 # ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
-# Keep-awake: impedisce a Windows di sospendersi durante la conversione lunga.
-# Usa l'API SetThreadExecutionState (solo Windows). Su altri OS e' no-op.
+# Keep-awake: stops Windows from sleeping during a long conversion.
+# Uses the SetThreadExecutionState API (Windows only). A no-op on other OSes.
 # ----------------------------------------------------------------------------
 class _KeepAwake:
-    """Context manager: chiede a Windows di NON sospendersi mentre il blocco
-       e' attivo. Lo schermo puo' spegnersi liberamente (per risparmio energia).
+    """Context manager: asks Windows NOT to sleep while the block
+       is active. The screen can turn off freely (to save energy).
 
-       Uso:
+       Usage:
            with _KeepAwake():
-               ...lavoro lungo...
+               ...long work...
     """
     # flag dell'API SetThreadExecutionState
     _ES_CONTINUOUS       = 0x80000000
     _ES_SYSTEM_REQUIRED  = 0x00000001
     _ES_AWAYMODE_REQUIRED = 0x00000040
-    # (NON usiamo ES_DISPLAY_REQUIRED, cosi' lo schermo puo' spegnersi)
+    # (we do NOT use ES_DISPLAY_REQUIRED, so the screen can turn off)
 
     def __enter__(self):
         if sys.platform != "win32":
@@ -1515,14 +1515,14 @@ class _KeepAwake:
             import ctypes
             self._k = ctypes.windll.kernel32
             flags = self._ES_CONTINUOUS | self._ES_SYSTEM_REQUIRED
-            # ES_AWAYMODE_REQUIRED: massima resilienza, anche su laptop a batteria
+            # ES_AWAYMODE_REQUIRED: maximum resilience, even on a laptop on battery
             flags |= self._ES_AWAYMODE_REQUIRED
             self._k.SetThreadExecutionState(flags)
             self._active = True
-            print("  [keep-awake] Sospensione di Windows disabilitata "
-                  "(lo schermo si puo' spegnere lo stesso)")
+            print("  [keep-awake] Windows sleep disabled "
+                  "(the screen can still turn off)")
         except Exception as e:
-            print(f"  [keep-awake] non disponibile: {e}", file=sys.stderr)
+            print(f"  [keep-awake] not available: {e}", file=sys.stderr)
             self._active = False
         return self
 
@@ -1530,14 +1530,14 @@ class _KeepAwake:
         if getattr(self, "_active", False):
             try:
                 self._k.SetThreadExecutionState(self._ES_CONTINUOUS)
-                print("  [keep-awake] Stato sospensione di Windows ripristinato")
+                print("  [keep-awake] Windows sleep state restored")
             except Exception:
                 pass
 
 
 def _run_marker_single(src: Path, out_dir: Path, force_ocr: bool):
     if not shutil.which("marker_single"):
-        raise RuntimeError("marker non trovato (pip install marker-pdf).")
+        raise RuntimeError("marker not found (pip install marker-pdf).")
     cmd = ["marker_single", str(src),
            "--output_dir", str(out_dir),
            "--output_format", "markdown"]
@@ -1567,17 +1567,17 @@ def convert_with_marker(src: Path, force_ocr: bool,
                         block_size: int = 0,
                         media_dirname: str = "media",
                         resume: bool = True) -> tuple[str, Path]:
-    """Converte un PDF con marker (lento ma OCR di qualita').
-       - block_size>0: spezza il PDF in blocchi e li unisce
-       - resume=True (default): salta i blocchi gia' completati su disco,
-         cosi' si puo' interrompere e riprendere senza perdere il lavoro fatto
+    """Converts a PDF with marker (slow but quality OCR).
+       - block_size>0: splits the PDF into blocks and joins them
+       - resume=True (default): skips blocks already finished on disk,
+         so you can stop and resume without losing work
     """
     assets = src.parent / media_dirname / src.stem
     is_pdf = src.suffix.lower() in PDF_EXT
     chunked = is_pdf and block_size and block_size > 0
 
     if chunked:
-        # in modalita' a blocchi: NON cancello assets se resume e' attivo
+        # in block mode: do NOT delete assets if resume is active
         if not resume and assets.exists():
             shutil.rmtree(assets)
         assets.mkdir(parents=True, exist_ok=True)
@@ -1591,15 +1591,15 @@ def convert_with_marker(src: Path, force_ocr: bool,
                 for idx, (ps, pe, chunk_pdf) in enumerate(chunks, 1):
                     chunk_out = assets / f"_chunk_{idx:03d}"
                     existing_mds = list(chunk_out.rglob("*.md")) if chunk_out.exists() else []
-                    # RESUME: blocco gia' completato? Lo riuso senza rifare marker.
+                    # RESUME: block already finished? Reuse it without redoing marker.
                     if resume and existing_mds:
                         produced = existing_mds[0]
                         try:
-                            # validazione minima: il .md deve essere non vuoto
+                            # minimal validation: the .md must be non-empty
                             txt = produced.read_text(encoding="utf-8")
                             if len(txt.strip()) > 50:
                                 print(f"  [blocco {idx}/{len(chunks)}] pagine {ps}-{pe} "
-                                      f"GIA' FATTO, salto (resume)")
+                                      f"ALREADY DONE, skipping (resume)")
                                 rel = produced.parent.relative_to(src.parent).as_posix()
                                 txt = _rewrite_image_paths(txt, rel)
                                 merged.append(
@@ -1609,7 +1609,7 @@ def convert_with_marker(src: Path, force_ocr: bool,
                                 continue
                         except Exception:
                             pass
-                    # blocco da fare ex novo (cancella eventuali residui parziali)
+                    # block to do from scratch (delete any partial leftovers)
                     if chunk_out.exists():
                         shutil.rmtree(chunk_out)
                     chunk_out.mkdir(parents=True, exist_ok=True)
@@ -1617,7 +1617,7 @@ def convert_with_marker(src: Path, force_ocr: bool,
                     _run_marker_single(chunk_pdf, chunk_out, force_ocr)
                     mds = list(chunk_out.rglob("*.md"))
                     if not mds:
-                        raise RuntimeError(f"marker non ha prodotto .md per blocco {idx}")
+                        raise RuntimeError(f"marker did not produce an .md for block {idx}")
                     produced = mds[0]
                     text = produced.read_text(encoding="utf-8")
                     rel = produced.parent.relative_to(src.parent).as_posix()
@@ -1627,13 +1627,13 @@ def convert_with_marker(src: Path, force_ocr: bool,
                         + text.strip() + "\n")
                     done += 1
             if skipped:
-                print(f"  [resume] saltati {skipped} blocchi gia' completati, "
+                print(f"  [resume] skipped {skipped} blocks already finished, "
                       f"rifatti {done}")
             full_md = "".join(merged)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
     else:
-        # modalita' singola (file intero, no blocchi): non c'e' resume sensato
+        # single mode (whole file, no blocks): resuming makes no sense
         if assets.exists():
             shutil.rmtree(assets)
         assets.mkdir(parents=True, exist_ok=True)
@@ -1641,7 +1641,7 @@ def convert_with_marker(src: Path, force_ocr: bool,
             _run_marker_single(src, assets, force_ocr)
         mds = list(assets.rglob("*.md"))
         if not mds:
-            raise RuntimeError("marker non ha prodotto alcun .md")
+            raise RuntimeError("marker did not produce any .md")
         produced = mds[0]
         full_md = produced.read_text(encoding="utf-8")
         rel = produced.parent.relative_to(src.parent).as_posix()
@@ -1650,12 +1650,12 @@ def convert_with_marker(src: Path, force_ocr: bool,
 
 
 # ----------------------------------------------------------------------------
-# Report di qualita'
+# Quality report
 # ----------------------------------------------------------------------------
 def quality_report(md_text: str, assets: Path | None, elapsed: float | None = None,
                    n_pages: int | None = None) -> str:
     n_chars   = len(md_text)
-    # formule: blocchi $$..$$ + inline $..$
+    # formulas: $$..$$ blocks + inline $..$
     n_formule = md_text.count("$$") // 2 + len(re.findall(r"(?<!\$)\$[^\$\n]+\$", md_text))
     n_tabelle = len(re.findall(r"^\s*\|.+\|\s*$", md_text, flags=re.M))
     n_figure  = 0
@@ -1665,15 +1665,15 @@ def quality_report(md_text: str, assets: Path | None, elapsed: float | None = No
     bits = []
     if n_pages is not None: bits.append(f"{n_pages} pagine")
     bits.append(f"{n_chars} caratteri")
-    bits.append(f"~{n_tabelle} righe-tabella")
-    bits.append(f"~{n_formule} formule")
-    bits.append(f"{n_figure} figure")
+    bits.append(f"~{n_tabelle} table rows")
+    bits.append(f"~{n_formule} formulas")
+    bits.append(f"{n_figure} figures")
     if elapsed is not None: bits.append(f"{elapsed:.1f}s")
     return " | ".join(bits)
 
 
 # ----------------------------------------------------------------------------
-# Routing + conversione di un singolo file
+# Routing + conversion of a single file
 # ----------------------------------------------------------------------------
 CSV_EXT = {".csv", ".tsv"}
 
@@ -1681,24 +1681,24 @@ def choose_engine(src: Path, forced: str | None) -> str:
     ext = src.suffix.lower()
     name_l = src.name.lower()
     if forced and forced != "auto":
-        # 'marker' valido solo su PDF/immagini; 'pymupdf4llm' valido solo su PDF.
+        # 'marker' valid only on PDF/images; 'pymupdf4llm' valid only on PDF.
         if forced == "pymupdf4llm" and ext not in PDF_EXT:
             return "markitdown" if ext in OFFICE_WEB_EXT else "marker"
-        # motori OCR-IA (ocr_vlm.py): solo PDF e immagini
+        # AI-OCR engines (ocr_vlm.py): PDF and images only
         if forced.startswith("vlm_") and ext not in PDF_EXT and ext not in IMAGE_EXT:
             return choose_engine(src, "auto")
         return forced
-    # nomi speciali senza estensione: Dockerfile, Makefile, CMakeLists.txt, ...
+    # special names without an extension: Dockerfile, Makefile, CMakeLists.txt, ...
     if name_l in ("dockerfile", "makefile", "cmakelists.txt", "rakefile", "gemfile"):
         return "code"
-    # routing dedicato per ogni formato (qualita' ottima)
+    # dedicated routing for each format (excellent quality)
     if ext in PDF_EXT:
-        # rilevamento PDF scansionato+OCR (libri da Anna's Archive, ecc.)
+        # detection of scanned+OCR PDFs (books from online archives, etc.)
         try:
             if _is_scanned_ocr_pdf(src):
                 return "ocr_scan"
-            # scansione SENZA testo -> OCR Tesseract automatico (veloce);
-            # marker resta la scelta manuale per qualita' massima
+            # scan WITHOUT text -> automatic Tesseract OCR (fast);
+            # marker stays the manual choice for maximum quality
             if _is_scanned_no_text_pdf(src):
                 return "ocr_tesseract"
         except Exception:
@@ -1714,9 +1714,9 @@ def choose_engine(src: Path, forced: str | None) -> str:
     if ext in AUDIO_EXT:      return "audio"
     if ext in VIDEO_EXT:      return "video"
     if ext in CODE_EXT:       return "code"
-    if ext in TEXT_DATA_EXT:  return "code"  # stesso motore con linguaggio specifico
+    if ext in TEXT_DATA_EXT:  return "code"  # same engine with a specific language
     if ext in OFFICE_WEB_EXT: return "markitdown"  # docx, html, epub, json, odt, ...
-    if ext in IMAGE_EXT:      return "ocr_image"   # Tesseract: secondi, non ore
+    if ext in IMAGE_EXT:      return "ocr_image"   # Tesseract: seconds, not hours
     if ext in PASSTHROUGH:    return "passthrough"
     return "markitdown"
 
@@ -1727,7 +1727,7 @@ def convert_one(src: Path, args) -> dict:
             "ok": False, "note": "", "report": ""}
 
     if out_md.exists() and not args.overwrite and src.suffix.lower() not in PASSTHROUGH:
-        info.update(ok=True, note="gia' presente (usa --overwrite)")
+        info.update(ok=True, note="already exists (use --overwrite)")
         return info
 
     engine = choose_engine(src, args.engine)
@@ -1778,7 +1778,7 @@ def convert_one(src: Path, args) -> dict:
             n_pages = _pdf_pages(src)
             text, assets = convert_with_ocr_tesseract_pdf(
                 src,
-                page_image_dpi=max(args.page_image_dpi, 200),  # OCR vuole dpi alti
+                page_image_dpi=max(args.page_image_dpi, 200),  # OCR wants high dpi
                 media_dirname=args.media_dir,
                 lang=getattr(args, "ocr_lang", "ita+eng"))
         elif engine == "ocr_image":
@@ -1793,8 +1793,8 @@ def convert_one(src: Path, args) -> dict:
                 max_side=getattr(args, "ai_max_side", 1568),
                 lang=getattr(args, "ocr_lang", "ita+eng"))
         elif engine in ("vlm_paddle", "vlm_chandra", "vlm_ibrido"):
-            # OCR con modelli di visione LOCALI via llama.cpp (ocr_vlm.py):
-            # PaddleOCR-VL 1.6 (veloce) / Chandra OCR 2 (manoscritti, figure)
+            # OCR with LOCAL vision models via llama.cpp (ocr_vlm.py):
+            # PaddleOCR-VL 1.6 (fast) / Chandra OCR 2 (handwriting, figures)
             import ocr_vlm
             if src.suffix.lower() in PDF_EXT:
                 n_pages = _pdf_pages(src)
@@ -1806,31 +1806,31 @@ def convert_one(src: Path, args) -> dict:
                 src, args.force_ocr, block_size=args.block_size,
                 media_dirname=args.media_dir)
         else:
-            raise ValueError(f"motore non valido: {engine}")
+            raise ValueError(f"invalid engine: {engine}")
 
-        # Spazi/parentesi nei path immagine rompono il rendering Markdown:
-        # percent-encoding qui, cosi' vale per TUTTI i motori.
+        # Spaces/parentheses in image paths break Markdown rendering:
+        # percent-encoding here, so it applies to ALL engines.
         text = _encode_md_link_urls(text)
 
-        header = (f"<!-- Generato da tomd2.py | sorgente: {src.name} | "
+        header = (f"<!-- Generated by tomd2.py | source: {src.name} | "
                   f"motore: {engine} -->\n\n")
         out_md.write_text(header + text.strip() + "\n", encoding="utf-8")
 
-        # Descrizioni IA delle immagini (opzionale, --describe-images):
-        # modello di visione LOCALE via Ollama, vedi img_describe.py.
-        # Non deve MAI far fallire la conversione: il .md e' gia' scritto.
+        # AI image descriptions (optional, --describe-images):
+        # LOCAL vision model via Ollama, see img_describe.py.
+        # It must NEVER make the conversion fail: the .md is already written.
         if getattr(args, "describe_images", False):
             try:
                 import img_describe
-                # NB: getattr con 'or' — argparse mette None se il flag manca
+                # NB: getattr with 'or' — argparse sets None if the flag is missing
                 _vmodel = (getattr(args, "describe_model", None)
                            or img_describe.DEFAULT_MODEL)
-                print(f"  Descrizioni IA delle immagini (modello {_vmodel}) ...")
+                print(f"  AI image descriptions (model {_vmodel}) ...")
                 st = img_describe.enrich_markdown(out_md, model=_vmodel)
-                info["note"] = (f"descrizioni IA: {st['done']} nuove, "
-                                f"{st['cached']} da cache, {st['failed']} fallite")
+                info["note"] = (f"AI descriptions: {st['done']} nuove, "
+                                f"{st['cached']} from cache, {st['failed']} fallite")
             except Exception as e:
-                info["note"] = f"descrizioni IA NON aggiunte: {e}"
+                info["note"] = f"AI descriptions NOT added: {e}"
                 print(f"  [WARN] {info['note']}", file=sys.stderr)
 
         elapsed = time.time() - t0
@@ -1838,9 +1838,9 @@ def convert_one(src: Path, args) -> dict:
                     report=quality_report(text, assets, elapsed, n_pages),
                     elapsed=elapsed)
     except subprocess.CalledProcessError as e:
-        info["note"] = f"ERRORE marker (codice {e.returncode}): controlla RAM/modelli."
+        info["note"] = f"marker ERROR (code {e.returncode}): controlla RAM/modelli."
     except Exception as e:
-        info["note"] = f"ERRORE: {type(e).__name__}: {e}"
+        info["note"] = f"ERROR: {type(e).__name__}: {e}"
     return info
 
 
@@ -1849,16 +1849,16 @@ def convert_one(src: Path, args) -> dict:
 # ----------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(
-        description="Converte file in Markdown ad alta fedelta', gratis e in locale. "
-                    "Engine PDF di default: pymupdf4llm (velocissimo, CPU).")
+        description="Converts files to high-fidelity Markdown, free and local. "
+                    "Default PDF engine: pymupdf4llm (very fast, CPU).")
     ap.add_argument("inputs", nargs="+",
-                    help="Nomi, percorsi, pattern glob oppure URL http(s)://...")
+                    help="Names, paths, glob patterns or http(s)://... URLs")
     ap.add_argument("--url-dest", default=".", type=lambda s: Path(s).expanduser(),
-                    help="Cartella di destinazione per i file scaricati da URL (default: .).")
+                    help="Destination folder for files downloaded from URLs (default: .).")
     ap.add_argument("--root", default=".", type=lambda s: Path(s).expanduser(),
-                    help="Cartella in cui cercare nomi/glob (default: corrente).")
+                    help="Folder to search for names/globs (default: current).")
     ap.add_argument("--no-recursive", dest="recursive", action="store_false",
-                    help="Non cercare nelle sottocartelle.")
+                    help="Do not search subfolders.")
     ap.add_argument("--engine", choices=["auto", "pymupdf4llm", "ocr_scan",
                                           "ocr_tesseract", "ocr_image", "ai_pack",
                                           "marker", "markitdown",
@@ -1867,98 +1867,98 @@ def main():
                                           "code", "ipynb", "eml", "archive",
                                           "ebook", "audio", "video"],
                     default="auto",
-                    help="Forza un motore. Default: auto (sceglie da estensione). "
-                         "'ai_pack' = PDF fotografici -> md COMPATTO per IA "
-                         "(WebP q70, 10-20x piu' leggero).")
+                    help="Forces an engine. Default: auto (chosen from the extension). "
+                         "'ai_pack' = photographic PDFs -> COMPACT md for AI "
+                         "(WebP q70, 10-20x lighter).")
     ap.add_argument("--ai-quality", type=int, default=70,
-                    help="AI-pack: qualita' WebP 1-100 (default 70).")
+                    help="AI-pack: WebP quality 1-100 (default 70).")
     ap.add_argument("--ai-max-side", type=int, default=1568,
-                    help="AI-pack: lato massimo immagini in px (default 1568, "
-                         "il massimo che le IA usano internamente).")
+                    help="AI-pack: maximum image side in px (default 1568, "
+                         "the maximum AIs use internally).")
     ap.add_argument("--whisper-model", default="base",
                     choices=["tiny", "base", "small", "medium", "large"],
-                    help="Modello Whisper per audio/video (default 'base'). "
-                         "'tiny' = velocissimo poco preciso; 'large' = lento accuratissimo.")
+                    help="Whisper model for audio/video (default 'base'). "
+                         "'tiny' = very fast, not very accurate; 'large' = slow, very accurate.")
     ap.add_argument("--ocr-lang", default="ita+eng",
-                    help="Lingue Tesseract per ocr_image/ocr_tesseract (default 'ita+eng').")
+                    help="Tesseract languages for ocr_image/ocr_tesseract (default 'ita+eng').")
     ap.add_argument("--describe-images", action="store_true",
-                    help="Dopo la conversione descrive OGNI immagine del .md con "
-                         "un'IA di visione LOCALE (Ollama): formule in LaTeX, "
-                         "grafici e diagrammi spiegati. Lento ma riprendibile "
-                         "(cache). Richiede Ollama installato.")
+                    help="After the conversion describes EVERY image of the .md with "
+                         "a LOCAL vision AI (Ollama): formulas in LaTeX, "
+                         "charts and diagrams explained. Slow but resumable "
+                         "(cache). Requires Ollama installed.")
     ap.add_argument("--describe-model", default=None,
-                    help="Modello visione Ollama per --describe-images "
+                    help="Ollama vision model for --describe-images "
                          "(default: qwen2.5vl:3b).")
-    # ---- OCR con IA di visione locale (ocr_vlm.py) ----
+    # ---- OCR with local vision AI (ocr_vlm.py) ----
     ap.add_argument("--pages", default=None,
-                    help="Motori vlm_*: pagine da convertire, es. '1-10,15,379-383' "
-                         "(default: tutte).")
+                    help="vlm_* engines: pages to convert, e.g. '1-10,15,379-383' "
+                         "(default: all).")
     ap.add_argument("--hq-pages", default=None,
-                    help="vlm_ibrido: pagine da fare con Chandra (scrittura a mano, "
-                         "figure), es. '379-453'. Le altre vanno a PaddleOCR-VL.")
+                    help="vlm_ibrido: pages to do with Chandra (handwriting, "
+                         "figures), e.g. '379-453'. The others go to PaddleOCR-VL.")
     ap.add_argument("--vlm-threads", type=int, default=None,
-                    help="Thread CPU per llama.cpp (default: numero di core fisici).")
+                    help="CPU threads for llama.cpp (default: number of physical cores).")
     ap.add_argument("--vlm-gpu", action="store_true",
-                    help="Prova la grafica integrata via Vulkan (sperimentale).")
+                    help="Try integrated graphics via Vulkan (experimental).")
     ap.add_argument("--overwrite", action="store_true",
-                    help="Sovrascrive i .md gia' esistenti.")
+                    help="Overwrite existing .md files.")
     ap.add_argument("--media-dir", default="media",
-                    help="Nome della cartella che raccoglie le immagini di TUTTI "
-                         "i file (default: 'media'). Struttura: <cartella>/<media-dir>/<nome>/.")
-    # opzioni page-image (default ON: ci servono per i diagrammi vettoriali)
+                    help="Name of the folder that collects the images of ALL "
+                         "the files (default: 'media'). Structure: <folder>/<media-dir>/<name>/.")
+    # page-image options (default ON: needed for vector diagrams)
     ap.add_argument("--page-images", dest="page_images", action="store_true", default=True,
-                    help="Solo PDF: renderizza le pagine con grafica vettoriale come PNG "
-                         "(garanzia diagrammi). Attivo di default.")
+                    help="PDF only: renders the pages with vector graphics as PNGs "
+                         "(diagram guarantee). On by default.")
     ap.add_argument("--no-page-images", dest="page_images", action="store_false",
-                    help="Disattiva il rendering pagina-immagine.")
+                    help="Disables page-image rendering.")
     ap.add_argument("--lean-md", action="store_true",
-                    help="MD 'snello': link compatti invece di <details><summary>. "
-                         "Riduce boilerplate per LLM (suggerito da Gemini).")
+                    help="'Lean' MD: compact links instead of <details><summary>. "
+                         "Reduces boilerplate for LLMs (suggested by Gemini).")
     ap.add_argument("--page-image-dpi", type=int, default=150,
-                    help="DPI per le immagini estratte/pagine (default 150).")
+                    help="DPI for the extracted images/pages (default 150).")
     ap.add_argument("--vector-threshold", type=int, default=3,
-                    help="Soglia drawings vettoriali per considerare una pagina "
-                         "'con diagrammi' (default 3).")
-    # opzioni marker (solo --engine marker)
+                    help="Vector drawings threshold for considering a page "
+                         "'with diagrams' (default 3).")
+    # marker options (--engine marker only)
     ap.add_argument("--force-ocr", action="store_true",
-                    help="Marker: forza l'OCR (per PDF scansionati).")
+                    help="Marker: forces OCR (for scanned PDFs).")
     ap.add_argument("--block-size", type=int, default=0,
-                    help="Marker: spezza il PDF in blocchi di N pagine (consigliato 15-20 "
-                         "con 8 GB RAM). 0 = file intero.")
+                    help="Marker: splits the PDF into blocks of N pages (15-20 recommended "
+                         "with 8 GB of RAM). 0 = whole file.")
     ap.add_argument("--dry-run", action="store_true",
-                    help="Mostra solo cosa verrebbe convertito.")
+                    help="Only show what would be converted.")
     args = ap.parse_args()
 
-    # ---- separa URL dai file ----
+    # ---- separate URLs from files ----
     urls = [u for u in args.inputs if u.startswith(("http://", "https://"))]
     local_tokens = [u for u in args.inputs if not u.startswith(("http://", "https://"))]
 
     files, missing = resolve_inputs(local_tokens, args.root, args.recursive)
     for m in missing:
-        print(f"[!] non trovato: {m}", file=sys.stderr)
+        print(f"[!] not found: {m}", file=sys.stderr)
     files = [f for f in files if f.suffix.lower() in ALL_SUPPORTED
              or f.name.lower() in ("dockerfile", "makefile", "cmakelists.txt",
                                     "rakefile", "gemfile")]
 
-    # ---- scarica gli URL come file locali e aggiungili a 'files' ----
+    # ---- download the URLs as local files and add them to 'files' ----
     if urls:
         args.url_dest.mkdir(parents=True, exist_ok=True)
         for u in urls:
             try:
                 print(f"Scarico {u} ...")
                 _, _, out_md = convert_with_url(u, args.url_dest, args)
-                # il file scaricato e' gia' stato convertito in .md;
-                # lo segnalo come "fatto" creando l'entry .md
+                # the downloaded file has already been converted to .md;
+                # mark it as "done" by creating the .md entry
                 print(f"  -> {out_md}")
             except Exception as e:
-                print(f"  ERRORE download: {e}", file=sys.stderr)
+                print(f"  download ERROR: {e}", file=sys.stderr)
 
     if not files and not urls:
-        print("Nessun file convertibile trovato.", file=sys.stderr); sys.exit(1)
+        print("No convertible files found.", file=sys.stderr); sys.exit(1)
     if not files:
         return
 
-    print(f"File da convertire: {len(files)}")
+    print(f"Files to convert: {len(files)}")
     for f in files:
         print(f"  - {f}  ->  {f.with_suffix('.md').name}   "
               f"[{choose_engine(f, args.engine)}]")
@@ -1966,8 +1966,8 @@ def main():
         return
 
     results = []
-    # Keep-awake: previene la sospensione di Windows durante l'intero batch.
-    # Lo schermo puo' spegnersi comunque (per risparmio energia).
+    # Keep-awake: prevents Windows sleep during the whole batch.
+    # The screen can still turn off (to save energy).
     with _KeepAwake():
         for f in files:
             print(f"\n>>> {f.name}")

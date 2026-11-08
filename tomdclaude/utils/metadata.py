@@ -1,7 +1,7 @@
-"""Estrazione metadati usata dai validatori.
+"""Metadata extraction used by the validators.
 
-Funzioni pure, senza stato: dato un testo Markdown / un file PDF / un XLSX,
-ritornano strutture confrontabili (albero dei titoli, conteggi, dimensioni).
+Pure, stateless functions: given a Markdown text / a PDF file / an XLSX,
+they return comparable structures (heading tree, counts, sizes).
 """
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ from pathlib import Path
 
 _ATX = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _FENCE = re.compile(r"^\s*(```|~~~)")
-# Riga separatrice di una tabella Markdown: |---|:--:|  ecc.
+# Separator row of a Markdown table: |---|:--:|  etc.
 _TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$")
 
 
 def normalize_text(s: str) -> str:
-    """Normalizza per confronti robusti: NFKC, virgolette/trattini unificati,
-    spazi compressi, minuscolo."""
+    """Normalizes for robust comparisons: NFKC, unified quotes/dashes,
+    compressed spaces, lowercase."""
     s = unicodedata.normalize("NFKC", s or "")
     for a, b in (("’", "'"), ("‘", "'"), ("“", '"'), ("”", '"'),
                  ("—", "-"), ("–", "-"), (" ", " ")):
@@ -26,11 +26,11 @@ def normalize_text(s: str) -> str:
 
 
 def strip_inline_md(s: str) -> str:
-    """Rimuove la formattazione inline (`code`, **bold**, _it_, [link](url)) e le
-    formule matematiche `$...$`, per confrontare il testo 'puro' dei titoli.
+    """Removes inline formatting (`code`, **bold**, _it_, [link](url)) and
+    `$...$` math formulas, to compare the 'pure' text of headings.
 
-    Le formule vanno rimosse perche' nel PDF diventano immagini SVG (senza testo
-    estraibile): tenerle nel confronto produrrebbe falsi 'titolo mancante'."""
+    Formulas must be removed because in the PDF they become SVG images (with no
+    extractable text): keeping them in the comparison would produce false 'missing heading' errors."""
     s = re.sub(r"\$\$.+?\$\$", " ", s)
     s = re.sub(r"\$[^$]+\$", " ", s)
     s = re.sub(r"`([^`]*)`", r"\1", s)
@@ -43,7 +43,7 @@ def strip_inline_md(s: str) -> str:
 
 
 def markdown_heading_tree(text: str) -> list[tuple[int, str]]:
-    """Albero gerarchico dei titoli ATX (#..######), ignorando i blocchi di codice."""
+    """Hierarchical tree of the ATX headings (#..######), ignoring code blocks."""
     out: list[tuple[int, str]] = []
     in_fence = False
     for line in text.splitlines():
@@ -59,7 +59,7 @@ def markdown_heading_tree(text: str) -> list[tuple[int, str]]:
 
 
 def html_heading_tree(html: str) -> list[tuple[int, str]]:
-    """Albero dei titoli da HTML (<h1>..<h6>)."""
+    """Heading tree from HTML (<h1>..<h6>)."""
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(html, "html.parser")
@@ -70,7 +70,7 @@ def html_heading_tree(html: str) -> list[tuple[int, str]]:
 
 
 def count_md_tables(text: str) -> int:
-    """Numero di tabelle Markdown (contando le righe-separatore di header)."""
+    """Number of Markdown tables (counting the header separator rows)."""
     in_fence = False
     n = 0
     for line in text.splitlines():
@@ -83,15 +83,15 @@ def count_md_tables(text: str) -> int:
 
 
 def md_plain_length(text: str) -> int:
-    """Lunghezza approssimata del testo 'visibile' (senza simboli di sintassi).
-    Serve come riferimento per verificare che il PDF non sia quasi vuoto."""
+    """Approximate length of the 'visible' text (without syntax symbols).
+    Used as a reference to check that the PDF is not almost empty."""
     plain = re.sub(r"[#>*`_|~]", "", text)
     plain = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", plain)
     return len(re.sub(r"\s+", " ", plain).strip())
 
 
 def pdf_info(path) -> dict:
-    """Apre un PDF e ne ritorna n. pagine + testo estraibile (via PyMuPDF)."""
+    """Opens a PDF and returns its number of pages + extractable text (via PyMuPDF)."""
     import fitz  # PyMuPDF
 
     doc = fitz.open(str(path))
@@ -103,8 +103,8 @@ def pdf_info(path) -> dict:
 
 
 def xlsx_dimensions(path) -> dict:
-    """Dimensioni (righe x colonne) per ogni foglio di un XLSX (via openpyxl).
-    Usato dal validatore XLSX per verificare che nessuna riga/colonna sia persa."""
+    """Sizes (rows x columns) of each sheet of an XLSX (via openpyxl).
+    Used by the XLSX validator to check that no row/column was lost."""
     from openpyxl import load_workbook
 
     wb = load_workbook(str(path), read_only=True, data_only=True)

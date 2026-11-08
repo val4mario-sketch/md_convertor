@@ -4,7 +4,7 @@ A local file converter for Windows, with a desktop GUI and a command line. Its m
 PDFs and handwritten notes, into clean Markdown that an LLM can read. It also converts between document, data, image and media
 formats. Everything runs on your own machine, with no paid APIs and no uploads, and it does not need a GPU.
 
-The code comments, messages and interface are in Italian.
+The interface, code comments and messages are in English.
 
 ## What it does
 

@@ -1,1 +1,1 @@
-"""Nucleo: contratto dei convertitori, risultato tipizzato, registry e pipeline."""
+"""Core: converter contract, typed result, registry and pipeline."""

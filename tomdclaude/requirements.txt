@@ -1,13 +1,13 @@
 # Stack MD -> PDF leggibile (tomdclaude)
 markdown>=3.10            # Markdown -> HTML
 pymdown-extensions>=10.0  # estensioni extra (superfences, ecc. - opzionali)
-pygments>=2.20            # syntax highlighting del codice
+pygments>=2.20            # code syntax highlighting
 weasyprint>=69            # HTML+CSS -> PDF
 beautifulsoup4>=4.12      # estrazione titoli/sostituzione math nell'HTML
-PyMuPDF>=1.24             # lettura PDF prodotto (n. pagine, testo) per la validazione
+PyMuPDF>=1.24             # reading the produced PDF (pages, text) for validation
 openpyxl>=3.1            # dimensioni XLSX (validatore tabellare)
 matplotlib>=3.8           # rendering matematica LaTeX -> SVG (motore mathtext)
 
-# NOTA Windows: WeasyPrint richiede il runtime nativo GTK3.
+# Windows NOTE: WeasyPrint requires the native GTK3 runtime.
 #   winget install --id tschoonj.GTKForWindows -e
-# tomdclaude.utils.gtk lo aggancia automaticamente a runtime.
+# tomdclaude.utils.gtk hooks it automatically at run time.

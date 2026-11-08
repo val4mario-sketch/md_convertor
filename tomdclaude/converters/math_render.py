@@ -31,21 +31,21 @@ from matplotlib.mathtext import MathTextParser, math_to_image  # noqa: E402
 
 _AGG = MathTextParser("agg")
 
-# Marcatori di citazione (rumore da export LLM) finiti dentro le formule.
+# Citation markers (noise from LLM exports) that ended up inside formulas.
 _CITE = re.compile(r"\[cite_start\]|\[cite:[^\]]*\]")
-# Comandi non supportati da mathtext che possiamo neutralizzare senza perdita:
-# stili (\displaystyle...) e delimitatori dimensionati (\big \Big \bigg \Bigg [l|r|m]).
+# Commands not supported by mathtext that we can neutralize without loss:
+# styles (\displaystyle...) and sized delimiters (\big \Big \bigg \Bigg [l|r|m]).
 _STRIP = re.compile(
     r"\\(?:displaystyle|textstyle|scriptstyle|scriptscriptstyle|limits|nolimits)\b"
     r"|\\(?:bigg|Bigg|big|Big)[lrm]?\b"
 )
-# Sostituzioni 1:1 verso la sintassi che mathtext conosce.
+# 1:1 substitutions to the syntax mathtext knows.
 _REPLACE = (
     (re.compile(r"\\dfrac\b"), r"\\frac"),
     (re.compile(r"\\tfrac\b"), r"\\frac"),
     (re.compile(r"\\mbox\b"), r"\\text"),
     (re.compile(r"\\operatorname\b"), r"\\mathrm"),
-    (re.compile(r"\\le(?![a-zA-Z])"), r"\\leq"),   # \le -> \leq (mathtext non ha \le)
+    (re.compile(r"\\le(?![a-zA-Z])"), r"\\leq"),   # \le -> \leq (mathtext has no \le)
     (re.compile(r"\\ge(?![a-zA-Z])"), r"\\geq"),
     (re.compile(r"\\ne(?![a-zA-Z])"), r"\\neq"),
     (re.compile(r"\\implies\b"), r"\\Rightarrow"),
@@ -62,7 +62,7 @@ class MathStats:
 
 
 class MathRenderer:
-    """Rende le formule in SVG dentro ``workdir`` e ne tiene le statistiche."""
+    """Renders the formulas as SVGs inside ``workdir`` and keeps statistics."""
 
     def __init__(self, workdir: Path, fontsize: float = 11.0, color: str = "#1f2328",
                  display_scale: float = 1.45, dpi: int = 300):
@@ -77,14 +77,14 @@ class MathRenderer:
 
     # ------------------------------------------------------------------ pubblico
     def render(self, tex: str, display: bool) -> str:
-        """Ritorna il frammento HTML (img/span) per una formula. Mai solleva."""
+        """Returns the HTML fragment (img/span) for a formula. Never raises."""
         tex = tex.strip()
         if not tex:
             return ""
         self.stats.total += 1
         key = (tex, display)
         if key in self._cache:
-            self.stats.ok += 1  # gia' renderizzata con successo in precedenza
+            self.stats.ok += 1  # already rendered successfully earlier
             return self._cache[key]
 
         try:
@@ -105,12 +105,12 @@ class MathRenderer:
         prop = FontProperties(size=size)
         wrapped = f"${clean}$"
 
-        # 1) metriche per la baseline (px alla dpi scelta)
+        # 1) metrics for the baseline (px at the chosen dpi)
         ox, oy, width, height, depth, _img = _AGG.parse(wrapped, dpi=self.dpi, prop=prop)
         to_pt = 72.0 / self.dpi
         w_pt, h_pt, d_pt = width * to_pt, height * to_pt, depth * to_pt
 
-        # 2) SVG vettoriale su file (dedup per contenuto)
+        # 2) vector SVG to a file (deduplicated by content)
         h = hashlib.md5(f"{size}|{display}|{clean}".encode("utf-8")).hexdigest()[:16]
         svg_path = self.workdir / f"m_{h}.svg"
         if not svg_path.exists():
@@ -139,7 +139,7 @@ class MathRenderer:
     def _error_html(tex: str, display: bool, err: Exception) -> str:
         import html as _html
         safe = _html.escape(tex)
-        title = _html.escape(f"Formula non renderizzabile: {type(err).__name__}")
+        title = _html.escape(f"Formula cannot be rendered: {type(err).__name__}")
         cls = "math-error math-error-block" if display else "math-error"
         delim = "$$" if display else "$"
         return f'<span class="{cls}" title="{title}">{delim}{safe}{delim}</span>'

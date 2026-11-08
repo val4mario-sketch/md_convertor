@@ -1,1 +1,1 @@
-"""Utility trasversali: logging, runtime GTK per WeasyPrint, estrazione metadati."""
+"""Cross-cutting utilities: logging, GTK runtime for WeasyPrint, metadata extraction."""

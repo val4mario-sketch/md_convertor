@@ -1,19 +1,19 @@
 """
-tomdclaude — Sistema di conversione file modulare con validazione "gatekeeper".
+tomdclaude — Modular file conversion system with "gatekeeper" validation.
 
-Architettura:
-    core/        contratto astratto, risultato, registry, pipeline (orchestrazione)
-    converters/  un convertitore = una classe indipendente (es. MarkdownToPdfConverter)
-    validators/  controlli di integrità che confrontano i metadati sorgente/destinazione
-    utils/       logging, gestione runtime GTK, estrazione metadati
+Architecture:
+    core/        abstract contract, result, registry, pipeline (orchestration)
+    converters/  one converter = one independent class (e.g. MarkdownToPdfConverter)
+    validators/  integrity checks comparing source/target metadata
+    utils/       logging, GTK runtime handling, metadata extraction
 
-Principio cardine: una conversione viene scritta su file TEMPORANEO e diventa
-definitiva (commit) SOLO se supera tutti i validatori. In caso contrario il file
-non viene salvato e viene prodotto un log dettagliato dell'errore.
+Key principle: a conversion is written to a TEMPORARY file and becomes
+final (commit) ONLY if it passes all the validators. Otherwise the file
+is not saved and a detailed error log is produced.
 """
 
 __version__ = "0.1.0"
 
-from .core.pipeline import convert  # noqa: E402  (API pubblica comoda)
+from .core.pipeline import convert  # noqa: E402  (convenient public API)
 
 __all__ = ["convert", "__version__"]

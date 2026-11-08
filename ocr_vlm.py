@@ -1,41 +1,41 @@
 # -*- coding: utf-8 -*-
 """
-ocr_vlm.py — OCR "intelligente" con modelli di VISIONE LOCALI (gratis, offline).
+ocr_vlm.py — "Smart" OCR with LOCAL VISION models (free, offline).
 
-Due motori, entrambi eseguiti da llama.cpp (llama-server) sulla CPU:
+Two engines, both run by llama.cpp (llama-server) on the CPU:
 
-  * PADDLE  = PaddleOCR-VL 1.6 (Baidu, ~0.9 miliardi di parametri)
-              veloce, il migliore su testo dattiloscritto, formule e tabelle.
-              Restituisce testo + LaTeX (niente struttura/figure).
-  * CHANDRA = Chandra OCR 2 (Datalab, ~5 miliardi di parametri, quant. 4 bit)
-              piu' lento, il migliore tra i modelli aperti su SCRITTURA A MANO;
-              restituisce la pagina strutturata (titoli, liste, tabelle,
-              formule KaTeX) e DESCRIVE le figure, che vengono anche ritagliate
-              e salvate come immagini.
-  * IBRIDO  = Paddle su tutte le pagine; Chandra sulle pagine indicate con
-              --hq-pages e su quelle dove Paddle fallisce (testo troppo corto
-              rispetto all'inchiostro, ripetizioni in loop, testo illeggibile).
-              In piu' (versione 4) due CONTROLLORI, sempre locali:
-                - Qwen3.5-9B descrive le figure (con il testo della pagina come
-                  contesto) e rilegge i blocchi con formule scritti a mano;
-                - GLM-4.6V-Flash (famiglia diversa) fa da ARBITRO quando le
-                  letture non concordano e CONTROLLA le descrizioni delle
-                  figure (se trova errori Qwen riscrive e GLM ricontrolla).
-              Cio' che resta incerto va in <nome>_da_controllare.md.
+  * PADDLE  = PaddleOCR-VL 1.6 (Baidu, ~0.9 billion parameters)
+              fast, the best on typed text, formulas and tables.
+              Returns text + LaTeX (no structure/figures).
+  * CHANDRA = Chandra OCR 2 (Datalab, ~5 billion parameters, 4-bit quant.)
+              slower, the best open model on HANDWRITING;
+              returns the structured page (headings, lists, tables,
+              KaTeX formulas) and DESCRIBES the figures, which are also cropped
+              and saved as images.
+  * IBRIDO  = Paddle on all pages; Chandra on the pages given with
+              --hq-pages and on those where Paddle fails (text too short
+              for the ink, repetition loops, unreadable text).
+              In addition (version 4) two CHECKERS, still local:
+                - Qwen3.5-9B describes the figures (with the page text as
+                  context) and rereads handwritten formula blocks;
+                - GLM-4.6V-Flash (a different family) acts as REFEREE when
+                  readings disagree and CHECKS the figure descriptions
+                  (if it finds errors, Qwen rewrites and GLM checks again).
+              Whatever stays uncertain goes into <name>_da_controllare.md.
 
-Tutto in locale: i modelli si scaricano UNA volta in  <questa cartella>\\modelli
-e llama.cpp sta in  <questa cartella>\\motori\\llamacpp .
+All local: the models are downloaded ONCE into  <this folder>\\modelli
+and llama.cpp is in  <this folder>\\motori\\llamacpp .
 
-Uso da tomd2:   python tomd2.py file.pdf --engine vlm_paddle
-                python tomd2.py file.pdf --engine vlm_chandra --pages 1-20
-                python tomd2.py file.pdf --engine vlm_ibrido --hq-pages 379-453
-Uso diretto:    python ocr_vlm.py setup tutti          (scarica modelli + llama.cpp)
-                python ocr_vlm.py prova file.pdf --pages 12,381 --engine tutti
-                    -> scrive file_prova_paddle.md / file_prova_chandra.md
-                       (NON tocca file .md esistenti) e stampa i tempi.
+Use from tomd2:   python tomd2.py file.pdf --engine vlm_paddle
+                  python tomd2.py file.pdf --engine vlm_chandra --pages 1-20
+                  python tomd2.py file.pdf --engine vlm_ibrido --hq-pages 379-453
+Direct use:       python ocr_vlm.py setup tutti          (downloads models + llama.cpp)
+                  python ocr_vlm.py prova file.pdf --pages 12,381 --engine tutti
+                    -> writes file_prova_paddle.md / file_prova_chandra.md
+                       (does NOT touch existing .md files) and prints the times.
 
-Riprendibile: ogni pagina finita e' salvata in media/<nome>/_vlm_cache/, quindi
-se interrompi e rilanci riparte dalla prima pagina mancante.
+Resumable: each finished page is saved in media/<name>/_vlm_cache/, so
+if you interrupt and run again it restarts from the first missing page.
 """
 from __future__ import annotations
 
@@ -55,9 +55,9 @@ import zipfile
 from pathlib import Path
 
 # ----------------------------------------------------------------------------
-# Percorsi e configurazione
+# Paths and configuration
 # ----------------------------------------------------------------------------
-VERSIONE   = "4.7 (22-10-2026, lettori di formule specializzati)"
+VERSIONE   = "4.7 (22-10-2026, specialized formula readers)"
 BASE_DIR   = Path(__file__).resolve().parent
 MODELS_DIR = Path(os.environ.get("TOMD2_MODELS_DIR", BASE_DIR / "modelli"))
 MOTORI_DIR = BASE_DIR / "motori"
@@ -66,13 +66,13 @@ LOG_DIR    = BASE_DIR / "logs"
 HF = "https://huggingface.co"
 IS_WIN = os.name == "nt"
 
-# Quantizzazione Chandra: IQ4_NL (3,05 GB, consigliata con 16 GB di RAM).
-# Alternative: IQ3_M (2,49 GB, piu' veloce, meno preciso), Q6_K (4,08 GB).
+# Chandra quantization: IQ4_NL (3.05 GB, recommended with 16 GB of RAM).
+# Alternatives: IQ3_M (2.49 GB, faster, less accurate), Q6_K (4.08 GB).
 CHANDRA_QUANT = os.environ.get("TOMD2_CHANDRA_QUANT", "IQ4_NL")
-# Quantizzazione Paddle: Q8_0 (498 MB). Il modello e' piccolo: meglio non
-# scendere di piu', la precisione su formule ne risentirebbe.
+# Paddle quantization: Q8_0 (498 MB). The model is small: better not to
+# go lower, accuracy on formulas would suffer.
 PADDLE_QUANT = os.environ.get("TOMD2_PADDLE_QUANT", "Q8_0")
-# Controllori: 4 bit (Q4_K_M), ~6 GB di RAM ciascuno, uno alla volta.
+# Checkers: 4-bit (Q4_K_M), ~6 GB of RAM each, one at a time.
 QWEN_QUANT = os.environ.get("TOMD2_QWEN_QUANT", "Q4_K_M")
 GLM_QUANT = os.environ.get("TOMD2_GLM_QUANT", "Q4_K_M")
 
@@ -80,12 +80,12 @@ MODELS = {
     "paddle": {
         "nome": "PaddleOCR-VL 1.6",
         "files": [
-            # (repo HuggingFace, file remoto, nome locale)
+            # (HuggingFace repo, remote file, local name)
             ("SanjeevSOLANKI/PaddleOCR-VL-1.6-GGUF",
              f"PaddleOCR-VL-1.6-{PADDLE_QUANT}.gguf", None),
             ("SanjeevSOLANKI/PaddleOCR-VL-1.6-GGUF",
              "PaddleOCR-VL-1.6-mmproj.gguf", None),
-            # template di chat (alcune build di llama.cpp crashano senza)
+            # chat template (some llama.cpp builds crash without it)
             ("EstevaoNaval/PaddleOCR-VL-1.6-GGUF",
              "chat_template.jinja", "PaddleOCR-VL-1.6-chat_template.jinja"),
         ],
@@ -93,8 +93,8 @@ MODELS = {
         "ctx": 8192,
         "max_tokens": int(os.environ.get("TOMD2_PADDLE_MAXTOK", "3000")),
         "dpi": 200,
-        "max_pixels": 2_000_000,      # ~1190x1680 su A4: buon compromesso CPU
-        "prompt": "OCR:",             # NON cambiare: e' un modello specializzato
+        "max_pixels": 2_000_000,      # ~1190x1680 on A4: a good CPU compromise
+        "prompt": "OCR:",             # DO NOT change: it is a specialized model
         "sampling": {"temperature": 0.0, "repeat_penalty": 1.3,
                      "dry_multiplier": 0.8},
     },
@@ -109,17 +109,17 @@ MODELS = {
         "port": 11437,
         "ctx": 16384,
         "max_tokens": int(os.environ.get("TOMD2_CHANDRA_MAXTOK", "5000")),
-        "dpi": 192,                   # come il progetto ufficiale
-        # l'ufficiale usa fino a 3072x2048 (6,3 MP) su GPU; su CPU e' troppo:
-        # 3,1 MP (~1470x2090 su A4) tiene leggibili pedici e scrittura a mano.
+        "dpi": 192,                   # like the official project
+        # the official one uses up to 3072x2048 (6.3 MP) on GPU; too much on CPU:
+        # 3.1 MP (~1470x2090 on A4) keeps subscripts and handwriting readable.
         "max_pixels": 3_100_000,
         "prompt": None,               # -> CHANDRA_PROMPT (sotto)
         "sampling": {"temperature": 0.0, "top_p": 0.1},
     },
-    # --- CONTROLLORI (versione 4) -------------------------------------------
-    # Qwen3.5-9B (Alibaba): modello di visione GENERALISTA, capisce i disegni.
-    # Descrive le figure (sapendo di cosa parla la pagina) e fa da seconda
-    # lettura delle pagine scritte a mano.
+    # --- CHECKERS (version 4) -------------------------------------------------
+    # Qwen3.5-9B (Alibaba): GENERAL-PURPOSE vision model, understands drawings.
+    # Describes the figures (knowing what the page is about) and is a second
+    # reader of handwritten pages.
     "qwen": {
         "nome": "Qwen3.5-9B",
         "files": [
@@ -135,9 +135,9 @@ MODELS = {
         "sampling": {"temperature": 0.2, "top_p": 0.8, "top_k": 20,
                      "repeat_penalty": 1.05},
     },
-    # GLM-4.6V-Flash (Zhipu AI, 9B): famiglia DIVERSA da Qwen/Chandra, quindi
-    # sbaglia in punti diversi. Fa l'ARBITRO quando le letture non concordano
-    # e CONTROLLA le descrizioni delle figure scritte da Qwen.
+    # GLM-4.6V-Flash (Zhipu AI, 9B): a DIFFERENT family from Qwen/Chandra, so
+    # it makes mistakes in different places. Acts as REFEREE when readings disagree
+    # and CHECKS the figure descriptions written by Qwen.
     "glm": {
         "nome": "GLM-4.6V-Flash",
         "files": [
@@ -154,8 +154,8 @@ MODELS = {
     },
 }
 
-# Prompt ufficiale di Chandra OCR 2 (datalab-to/chandra, chandra/prompts.py,
-# OCR_LAYOUT_PROMPT): pagina -> HTML a blocchi con bbox ed etichette.
+# Official Chandra OCR 2 prompt (datalab-to/chandra, chandra/prompts.py,
+# OCR_LAYOUT_PROMPT): page -> block HTML with bboxes and labels.
 _ALLOWED_TAGS = ["math", "br", "i", "b", "u", "del", "sup", "sub", "table",
                  "tr", "td", "p", "th", "div", "pre", "h1", "h2", "h3", "h4",
                  "h5", "ul", "ol", "li", "input", "a", "span", "img", "hr",
@@ -219,10 +219,10 @@ def _log(*a):
 
 
 # ----------------------------------------------------------------------------
-# Download (con ripresa) di modelli e llama.cpp
+# Download (with resume) of models and llama.cpp
 # ----------------------------------------------------------------------------
 def _download(url: str, dest: Path, label: str = "") -> Path:
-    """Scarica url -> dest con RIPRESA (file .part) e percentuale a video."""
+    """Downloads url -> dest with RESUME (.part file) and an on-screen percentage."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() and dest.stat().st_size > 0:
         return dest
@@ -234,13 +234,13 @@ def _download(url: str, dest: Path, label: str = "") -> Path:
     try:
         resp = urllib.request.urlopen(req, timeout=60)
     except urllib.error.HTTPError as e:
-        if e.code == 416 and have:          # gia' completo
+        if e.code == 416 and have:          # already complete
             part.rename(dest)
             return dest
-        raise RuntimeError(f"download fallito ({e.code}) per {url}") from e
+        raise RuntimeError(f"download failed ({e.code}) for {url}") from e
     total = resp.headers.get("Content-Length")
     total = int(total) + have if total else None
-    if have and resp.status != 206:         # il server ignora il Range: riparto
+    if have and resp.status != 206:         # the server ignores Range: restarting
         have = 0
         mode = "wb"
     else:
@@ -264,7 +264,7 @@ def _download(url: str, dest: Path, label: str = "") -> Path:
                          f"({done/1e6:.0f}/{total/1e6:.0f} MB, {speed:.1f} MB/s)")
                     last = pct
     if total and done < total:
-        raise RuntimeError(f"download interrotto ({done}/{total} byte): rilancia, riprende da li'")
+        raise RuntimeError(f"download interrupted ({done}/{total} bytes): run it again, it resumes from there")
     part.rename(dest)
     return dest
 
@@ -289,13 +289,13 @@ def ensure_model(key: str) -> dict:
         dest = MODELS_DIR / (local or remote)
         if dest.exists() and dest.stat().st_size > 0:
             continue
-        _log(f"Scarico {spec['nome']}: {remote} (una tantum) ...")
+        _log(f"Scarico {spec['nome']}: {remote} (one time) ...")
         url = f"{HF}/{repo}/resolve/main/{remote}?download=true"
         try:
             _download(url, dest, label=remote)
         except Exception as e:
-            if remote.endswith(".jinja"):   # il template e' facoltativo
-                _log(f"  [avviso] template non scaricato ({e}): proseguo senza.")
+            if remote.endswith(".jinja"):   # the template is optional
+                _log(f"  [warning] template not downloaded ({e}): continuing without it.")
                 continue
             raise
     return model_paths(key)
@@ -307,11 +307,11 @@ def _server_exe_candidates(gpu: bool) -> list[Path]:
     env = os.environ.get("TOMD2_LLAMA_SERVER")
     if env:
         c.append(Path(env))
-    if gpu:                      # con la GPU serve la build Vulkan, non la CPU
+    if gpu:                      # the GPU needs the Vulkan build, not the CPU one
         c.append(MOTORI_DIR / "llamacpp-vulkan" / exe)
         return c
     c.append(MOTORI_DIR / "llamacpp" / exe)
-    if IS_WIN:   # installazione gia' presente sul PC (usata da img_describe)
+    if IS_WIN:   # installation already on the PC (used by img_describe)
         c.append(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "llamacpp" / exe)
     w = shutil.which("llama-server")
     if w:
@@ -320,16 +320,16 @@ def _server_exe_candidates(gpu: bool) -> list[Path]:
 
 
 def ensure_llamacpp(gpu: bool = False) -> Path:
-    """Ritorna il percorso di llama-server; se manca scarica l'ultima build
-       Windows da GitHub (CPU, oppure Vulkan per la grafica Intel se gpu=True)."""
+    """Returns the path of llama-server; if missing, downloads the latest
+       Windows build from GitHub (CPU, or Vulkan for Intel graphics if gpu=True)."""
     for p in _server_exe_candidates(gpu):
         if p.exists():
             return p
     if not IS_WIN:
-        raise RuntimeError("llama-server non trovato (installa llama.cpp o imposta TOMD2_LLAMA_SERVER).")
+        raise RuntimeError("llama-server not found (install llama.cpp or set TOMD2_LLAMA_SERVER).")
     flavor = "vulkan-x64" if gpu else "cpu-x64"
     target = MOTORI_DIR / ("llamacpp-vulkan" if gpu else "llamacpp")
-    _log(f"Scarico llama.cpp ({flavor}) da GitHub ...")
+    _log(f"Scarico llama.cpp ({flavor}) from GitHub ...")
     with urllib.request.urlopen(urllib.request.Request(
             "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
             headers={"User-Agent": "tomd2"}), timeout=60) as r:
@@ -337,7 +337,7 @@ def ensure_llamacpp(gpu: bool = False) -> Path:
     asset = next((a for a in rel["assets"]
                   if a["name"].endswith(f"bin-win-{flavor}.zip")), None)
     if not asset:
-        raise RuntimeError(f"build llama.cpp '{flavor}' non trovata nella release {rel.get('tag_name')}")
+        raise RuntimeError(f"build llama.cpp '{flavor}' not found in the release {rel.get('tag_name')}")
     zpath = MOTORI_DIR / asset["name"]
     _download(asset["browser_download_url"], zpath)
     target.mkdir(parents=True, exist_ok=True)
@@ -346,12 +346,12 @@ def ensure_llamacpp(gpu: bool = False) -> Path:
     (target / "VERSION.txt").write_text(rel.get("tag_name", "?"), encoding="utf-8")
     exe = target / "llama-server.exe"
     if not exe.exists():
-        raise RuntimeError("llama-server.exe non trovato nello zip scaricato")
+        raise RuntimeError("llama-server.exe not found in the downloaded zip")
     return exe
 
 
 # ----------------------------------------------------------------------------
-# Server llama.cpp (avvio/arresto automatico)
+# llama.cpp server (automatic start/stop)
 # ----------------------------------------------------------------------------
 def _http_json(url: str, payload: dict | None = None, timeout: float = 30):
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
@@ -363,8 +363,8 @@ def _http_json(url: str, payload: dict | None = None, timeout: float = 30):
 
 class LlamaServer:
     """with LlamaServer('chandra') as srv: srv.ocr(img) ...
-       Avvia llama-server col modello giusto, aspetta che sia pronto, lo
-       chiude all'uscita. Il log va in logs/llama_server_<motore>.log."""
+       Starts llama-server with the right model, waits until it is ready, and
+       closes it on exit. The log goes to logs/llama_server_<engine>.log."""
 
     def __init__(self, key: str, threads: int | None = None, gpu: bool = False):
         self.key = key
@@ -372,7 +372,7 @@ class LlamaServer:
         self.paths = ensure_model(key)
         self.exe = ensure_llamacpp(gpu)
         self.gpu = gpu
-        self.threads = threads or max(1, (os.cpu_count() or 4) // 2)  # core fisici
+        self.threads = threads or max(1, (os.cpu_count() or 4) // 2)  # physical cores
         self.port = int(os.environ.get(f"TOMD2_{key.upper()}_PORT", self.spec["port"]))
         self.url = f"http://127.0.0.1:{self.port}"
         self.proc = None
@@ -403,7 +403,7 @@ class LlamaServer:
             return False
 
     def start(self):
-        if self._healthy():           # gia' in esecuzione (es. lanciato a mano)
+        if self._healthy():           # already running (e.g. started by hand)
             return self
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         flags = 0x08000000 if IS_WIN else 0   # CREATE_NO_WINDOW
@@ -413,25 +413,25 @@ class LlamaServer:
             cmd = self._cmd(use_template)
             self.logf.write("CMD: " + " ".join(cmd) + "\n\n")
             self.logf.flush()
-            _log(f"  Avvio {self.spec['nome']} (llama.cpp, {self.threads} thread"
-                 f"{', GPU Vulkan' if self.gpu else ''}) ...")
+            _log(f"  Starting {self.spec['nome']} (llama.cpp, {self.threads} thread"
+                 f"{', Vulkan GPU' if self.gpu else ''}) ...")
             self.proc = subprocess.Popen(cmd, stdout=self.logf, stderr=subprocess.STDOUT,
                                          creationflags=flags)
             t0 = time.time()
-            while time.time() - t0 < 600:      # caricamento da disco: fino a 10 min
+            while time.time() - t0 < 600:      # loading from disk: up to 10 min
                 if self.proc.poll() is not None:
                     break
                 if self._healthy():
-                    _log(f"  {self.spec['nome']} pronto in {time.time()-t0:.0f} s")
+                    _log(f"  {self.spec['nome']} ready in {time.time()-t0:.0f} s")
                     return self
                 time.sleep(2)
             self.stop()
             if not use_template:
                 break
-            _log("  [avviso] avvio fallito col template di chat: riprovo senza.")
-        raise RuntimeError(f"llama-server non parte per {self.spec['nome']}: "
+            _log("  [warning] start-up failed with the chat template: retrying without.")
+        raise RuntimeError(f"llama-server does not start for {self.spec['nome']}: "
                            f"guarda {LOG_DIR / f'llama_server_{self.key}.log'} "
-                           "(spesso: llama.cpp troppo vecchio o RAM insufficiente)")
+                           "(often: llama.cpp too old or not enough RAM)")
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -451,20 +451,20 @@ class LlamaServer:
     def __exit__(self, *a):
         self.stop()
 
-    # -- richiesta OCR -------------------------------------------------------
+    # -- OCR request -----------------------------------------------------------
     def ocr(self, img, prompt: str | None = None, max_tokens: int | None = None,
             temperature: float | None = None, expected_tokens: float | None = None,
             label: str = "", sampling: dict | None = None) -> tuple[str, dict]:
-        """Invia la pagina al modello in STREAMING: mostra l'avanzamento ogni
-           ~10 s (token, velocita', % stimata, ultima riga) e interrompe
-           SUBITO la generazione se il modello entra in un loop."""
+        """Sends the page to the model in STREAMING mode: shows the progress every
+           ~10 s (tokens, speed, estimated %, last line) and stops the generation
+           IMMEDIATELY if the model enters a loop."""
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
         limit = max_tokens or self.spec["max_tokens"]
         testo = prompt or self.spec.get("prompt") or CHANDRA_PROMPT
         if self.key == "glm" and "/nothink" not in testo:
-            testo += "\n/nothink"          # GLM: niente ragionamento lungo
+            testo += "\n/nothink"          # GLM: no long reasoning
         payload = {
             "messages": [{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
@@ -473,7 +473,7 @@ class LlamaServer:
             "max_tokens": limit,
             "stream": True,
             "stream_options": {"include_usage": True},
-            # niente "ragionamento" nascosto (modelli tipo Qwen3.5): solo l'output
+            # no hidden "reasoning" (Qwen3.5-type models): output only
             "chat_template_kwargs": {"enable_thinking": False},
         }
         payload.update(self.spec["sampling"])
@@ -513,7 +513,7 @@ class LlamaServer:
                         think.append(d["reasoning_content"]); ntok += 1
                 if ntok and t_first is None:
                     t_first = time.time()
-                    _log(f"    {label} immagine letta in {t_first - t0:.0f} s, scrivo il testo...")
+                    _log(f"    {label} image read in {t_first - t0:.0f} s, writing the text...")
                 now = time.time()
                 if now - last_print >= 10 and ntok:
                     last_print = now
@@ -523,13 +523,13 @@ class LlamaServer:
                         pct = f" (~{min(99, int(ntok * 100 / expected_tokens))}% stimato)"
                     tail = "".join(parts)[-70:].replace("\n", " ").strip()
                     _log(f"    {label} {ntok} token{pct} | {speed:.1f} t/s | ...{tail}")
-                # controllo loop ogni ~100 token: se si ripete, stop subito
+                # loop check every ~100 tokens: if it repeats, stop right away
                 if ntok % 100 == 0 and ntok >= 300 and detect_repeat("".join(parts)):
                     stopped = "loop"
-                    _log(f"    {label} [LOOP] il modello si ripete: interrompo a {ntok} token")
+                    _log(f"    {label} [LOOP] the model is repeating itself: stopping at {ntok} token")
                     break
         text = "".join(parts)
-        if not text.strip() and think:          # modello che ha scritto solo nel "ragionamento"
+        if not text.strip() and think:          # model that wrote only in the "reasoning"
             text = "".join(think)
         usage = dict(usage or {})
         usage.setdefault("completion_tokens", ntok)
@@ -538,11 +538,11 @@ class LlamaServer:
 
 
 # ----------------------------------------------------------------------------
-# Immagini di pagina
+# Page images
 # ----------------------------------------------------------------------------
 def scale_to_fit(img, max_pixels: int, min_pixels: int = 1792 * 28, grid: int = 28):
-    """Ridimensiona mantenendo le proporzioni, multipli di 28 px (patch
-       del vision encoder), entro max_pixels. Porting da chandra/model/util.py."""
+    """Resizes keeping the proportions, multiples of 28 px (vision encoder
+       patch), within max_pixels. Ported from chandra/model/util.py."""
     from PIL import Image
     w, h = img.size
     if w <= 0 or h <= 0:
@@ -580,8 +580,8 @@ def render_page(doc, i: int, dpi: int):
 
 
 def ink_ratio(img) -> float:
-    """Frazione di pixel 'scuri' (testo/disegni) nella parte centrale della
-       pagina: serve a capire se una pagina vuota e' davvero vuota."""
+    """Fraction of 'dark' pixels (text/drawings) in the central part of the
+       page: used to tell whether an empty page is really empty."""
     g = img.convert("L")
     w, h = g.size
     g = g.crop((int(w * .05), int(h * .06), int(w * .95), int(h * .94)))
@@ -596,8 +596,8 @@ def ink_ratio(img) -> float:
 # ----------------------------------------------------------------------------
 def detect_repeat(text: str, window: int = 500, base_max: int = 4,
                   scaling: float = 3.0) -> bool:
-    """True se il testo finisce con una sequenza ripetuta troppe volte
-       (loop del modello). Porting semplificato da chandra/model/util.py."""
+    """True if the text ends with a sequence repeated too many times
+       (model loop). Simplified port from chandra/model/util.py."""
     t = text[-4000:]
     for L in range(1, window // 2 + 1):
         cand = t[-L:]
@@ -611,7 +611,7 @@ def detect_repeat(text: str, window: int = 500, base_max: int = 4,
             pos -= L
         if reps > max_rep:
             return True
-    # righe identiche consecutive
+    # consecutive identical lines
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     run = 1
     for a, b in zip(lines, lines[1:]):
@@ -622,7 +622,7 @@ def detect_repeat(text: str, window: int = 500, base_max: int = 4,
 
 
 def trim_repeats(text: str) -> str:
-    """Taglia le righe identiche ripetute oltre la 3a volta consecutiva."""
+    """Cuts identical lines repeated beyond the 3rd consecutive time."""
     out, prev, run = [], None, 0
     for ln in text.splitlines():
         run = run + 1 if ln.strip() and ln == prev else 1
@@ -638,17 +638,17 @@ def normalize_math(md: str) -> str:
     return md
 
 
-def _n_left(f: str) -> int:      # \left( ...  ma NON \leftarrow
+def _n_left(f: str) -> int:      # \left( ...  but NOT \leftarrow
     return len(re.findall(r"\\left(?![A-Za-z])", f))
 
 
-def _n_right(f: str) -> int:     # \right) ... ma NON \rightarrow
+def _n_right(f: str) -> int:     # \right) ... but NOT \rightarrow
     return len(re.findall(r"\\right(?![A-Za-z])", f))
 
 
 def math_issues(md: str) -> int:
-    """Conta le formule con parentesi graffe sbilanciate o \\left/\\right
-       spaiati (controllo leggero, senza KaTeX)."""
+    """Counts formulas with unbalanced braces or unmatched \\left/\\right
+       (a light check, without KaTeX)."""
     n = 0
     formulas = re.findall(r"\$\$(.+?)\$\$", md, flags=re.S)
     rest = re.sub(r"\$\$(.+?)\$\$", " ", md, flags=re.S)
@@ -663,7 +663,7 @@ def math_issues(md: str) -> int:
 
 
 def _md_escape_fallback(html: str) -> str:
-    """Conversione HTML->Markdown minimale (se mancano bs4/markdownify)."""
+    """Minimal HTML->Markdown conversion (if bs4/markdownify are missing)."""
     s = html
     s = re.sub(r"<math[^>]*display=\"?block\"?[^>]*>(.*?)</math>", r"\n$$\n\1\n$$\n", s, flags=re.S)
     s = re.sub(r"<math[^>]*>(.*?)</math>", r"$\1$", s, flags=re.S)
@@ -680,13 +680,13 @@ def _md_escape_fallback(html: str) -> str:
 
 
 def _frag_to_md(fragment: str) -> str:
-    """Frammento HTML (stile Chandra) -> Markdown, formule <math> intatte."""
+    """HTML fragment (Chandra style) -> Markdown, <math> formulas intact."""
     from bs4 import BeautifulSoup
     from markdownify import MarkdownConverter
 
     class _MD(MarkdownConverter):
         def convert_table(self, el, text, *a, **k):
-            return "\n\n" + str(el) + "\n\n"     # tabelle complesse: HTML intatto
+            return "\n\n" + str(el) + "\n\n"     # complex tables: HTML intact
 
     frag = BeautifulSoup(fragment, "html.parser")
     stash = []
@@ -706,9 +706,9 @@ def _frag_to_md(fragment: str) -> str:
 
 
 def chandra_describe(raw: str) -> str:
-    """Testo di Chandra su un RITAGLIO di figura -> descrizione in Markdown
-       (alt + contenuto dei blocchi; i blocchi di testo dentro la figura,
-       es. etichette, vengono tenuti)."""
+    """Chandra text on a figure CROP -> description in Markdown
+       (alt + block content; the text blocks inside the figure,
+       e.g. labels, are kept)."""
     raw = _strip_fences(raw)
     try:
         from bs4 import BeautifulSoup
@@ -731,7 +731,7 @@ def chandra_describe(raw: str) -> str:
 
 
 def dedup_frasi(text: str) -> str:
-    """Taglia il testo alla prima frase che il modello ripete in loop."""
+    """Cuts the text at the first sentence the model repeats in a loop."""
     frasi = re.split(r"(?<=[.!?;])\s+", text)
     out, viste = [], set()
     for f in frasi:
@@ -744,17 +744,17 @@ def dedup_frasi(text: str) -> str:
 
 
 def fix_list_markers(md: str) -> str:
-    """'- - testo', '- o testo', '- • testo' -> '- testo' (il modello copia
-       anche il trattino/cerchietto originale dentro la voce di elenco)."""
+    """'- - text', '- o text', '- • text' -> '- text' (the model also copies
+       the original dash/bullet into the list item)."""
     return re.sub(r"(?m)^([ \t]*)[-*][ \t]+(?:[-–•◦▪○o]|\\-)[ \t]+(?=\S)", r"\1- ", md)
 
 
 def chandra_html_to_md(html: str, img, page_no: int, fig_dir: Path,
                        fig_prefix: str, blocchi: list | None = None) -> str:
-    """HTML a blocchi di Chandra -> Markdown nello stile tomd2:
-       - salta intestazioni/piè di pagina (Page-Header/Page-Footer)
-       - figure: ritaglio salvato come PNG + blocco descrizione
-       - formule <math> -> $...$ / $$...$$ (KaTeX)"""
+    """Chandra block HTML -> Markdown in the tomd2 style:
+       - skips headers/footers (Page-Header/Page-Footer)
+       - figures: crop saved as PNG + description block
+       - <math> formulas -> $...$ / $$...$$ (KaTeX)"""
     try:
         from bs4 import BeautifulSoup
         from markdownify import MarkdownConverter
@@ -800,7 +800,7 @@ def chandra_html_to_md(html: str, img, page_no: int, fig_dir: Path,
             continue
         body = to_md(str(div.decode_contents()))
         if blocchi is not None and div.find("math") is not None and body.strip():
-            # blocco con formule: segnaposto, verra' verificato (Qwen + arbitro)
+            # block with formulas: placeholder, it will be verified (Qwen + referee)
             try:
                 bb = [int(v) for v in (div.get("data-bbox") or "").split()][:4]
             except Exception:
@@ -817,10 +817,10 @@ def chandra_html_to_md(html: str, img, page_no: int, fig_dir: Path,
 
 
 # ----------------------------------------------------------------------------
-# Selezione pagine
+# Page selection
 # ----------------------------------------------------------------------------
 def parse_pages(spec: str | None, n: int) -> list[int]:
-    """'1-10,15,379-383' -> [1..10, 15, 379..383] (1-based, entro n)."""
+    """'1-10,15,379-383' -> [1..10, 15, 379..383] (1-based, within n)."""
     if not spec:
         return list(range(1, n + 1))
     out = set()
@@ -840,7 +840,7 @@ def parse_pages(spec: str | None, n: int) -> list[int]:
 
 
 # ----------------------------------------------------------------------------
-# Conversione di un PDF / immagine
+# Converting a PDF / image
 # ----------------------------------------------------------------------------
 def _cache_file(cache_dir: Path, key: str, page: int) -> Path:
     return cache_dir / key / f"page_{page:04d}.md"
@@ -860,14 +860,14 @@ def _ocr_one(srv: LlamaServer, key: str, page_img, page_no: int,
     label = f"[{key} p.{page_no}]"
     raw, usage = srv.ocr(img, expected_tokens=expected_tokens, label=label)
     retried = False
-    if usage.get("stopped") == "loop":     # loop: secondo tentativo "mosso"
+    if usage.get("stopped") == "loop":     # loop: second "shifted" attempt
         retried = True
-        _log(f"    {label} secondo tentativo...")
+        _log(f"    {label} second attempt...")
         raw2, usage2 = srv.ocr(img, temperature=0.3, expected_tokens=expected_tokens,
                                label=label)
         if usage2.get("stopped") != "loop" or len(raw2) > len(raw):
             raw, usage = raw2, usage2
-    if raw_file is not None:               # sempre: il testo grezzo del modello
+    if raw_file is not None:               # always: the raw text of the model
         raw_file.parent.mkdir(parents=True, exist_ok=True)
         raw_file.write_text(raw, encoding="utf-8")
     raw_clean = _strip_fences(raw)
@@ -876,14 +876,14 @@ def _ocr_one(srv: LlamaServer, key: str, page_img, page_no: int,
         try:
             md = chandra_html_to_md(raw_clean, img, page_no, fig_dir, fig_prefix)
         except Exception as e:
-            _log(f"    {label} [avviso] conversione HTML fallita ({e}): uso il ripiego")
+            _log(f"    {label} [warning] HTML conversion failed ({e}): using the fallback")
         if not md.strip() and raw_clean.strip():
-            md = _md_escape_fallback(raw_clean)      # HTML troncato o anomalo
+            md = _md_escape_fallback(raw_clean)      # truncated or abnormal HTML
     else:
         md = raw_clean
     md = normalize_math(trim_repeats(md)).strip()
     if not md and raw_clean.strip():
-        md = raw_clean.strip()                       # mai perdere il testo letto
+        md = raw_clean.strip()                       # never lose the text that was read
     meta = {"secondi": round(time.time() - t0, 1),
             "token_out": usage.get("completion_tokens"),
             "token_in": usage.get("prompt_tokens"),
@@ -893,23 +893,23 @@ def _ocr_one(srv: LlamaServer, key: str, page_img, page_no: int,
 
 
 # ----------------------------------------------------------------------------
-# PaddleOCR-VL "completo" (pipeline ufficiale Baidu): un piccolo modello di
-# LAYOUT (PP-DocLayoutV3, gira su CPU) divide la pagina in blocchi (titoli,
-# paragrafi, formule, tabelle, figure, note) e manda OGNI blocco al modello
-# PaddleOCR-VL sul nostro llama-server con il prompt giusto ("OCR:",
-# "Formula Recognition:", "Table Recognition:"). E' cosi' che Paddle e' stato
-# pensato e misurato nei benchmark: molto meglio della pagina intera.
+# "Full" PaddleOCR-VL (official Baidu pipeline): a small LAYOUT
+# model (PP-DocLayoutV3, runs on CPU) splits the page into blocks (headings,
+# paragraphs, formulas, tables, figures, notes) and sends EACH block to the
+# PaddleOCR-VL model on our llama-server with the right prompt ("OCR:",
+# "Formula Recognition:", "Table Recognition:"). This is how Paddle was
+# designed and benchmarked: much better than the whole page.
 # Richiede:  pip install paddlepaddle "paddleocr[doc-parser]"   (setup layout)
-# Se non e' installato, si ripiega sulla pagina intera con "OCR:".
+# If not installed, it falls back to the whole page with "OCR:".
 # ----------------------------------------------------------------------------
 _LAYOUT_ERR = None
 _LAYOUT_OK = None
 
 
 def _import_paddle_stack():
-    """Su Windows, se e' installato anche PyTorch, va importato PRIMA di paddle:
-       altrimenti le DLL di paddle 'rubano' quelle di torch e l'import di
-       paddleocr (che tramite modelscope carica torch) fallisce con
+    """On Windows, if PyTorch is also installed, it must be imported BEFORE paddle:
+       otherwise paddle's DLLs 'steal' torch's and the import of
+       paddleocr (which loads torch through modelscope) fails with
        'WinError 127 ... shm.dll'."""
     try:
         import torch  # noqa: F401
@@ -922,7 +922,7 @@ def _import_paddle_stack():
 def paddle_layout_disponibile() -> bool:
     global _LAYOUT_ERR, _LAYOUT_OK
     if os.environ.get("TOMD2_PADDLE_LAYOUT", "1") == "0":
-        _LAYOUT_ERR = "disattivato con TOMD2_PADDLE_LAYOUT=0"
+        _LAYOUT_ERR = "disabled with TOMD2_PADDLE_LAYOUT=0"
         return False
     if _LAYOUT_OK is None:
         try:
@@ -938,26 +938,26 @@ class PaddleLayout:
     def __init__(self, server_url: str):
         _import_paddle_stack()
         from paddleocr import PaddleOCRVL
-        _log("  Carico il modello di layout PP-DocLayoutV3 (la prima volta lo scarica) ...")
+        _log("  Loading the PP-DocLayoutV3 layout model (downloaded the first time) ...")
         self.pipe = PaddleOCRVL(
             pipeline_version="v1.6",
             vl_rec_backend="llama-cpp-server",
             vl_rec_server_url=server_url.rstrip("/") + "/v1",
-            vl_rec_max_concurrency=1,          # un blocco alla volta: CPU
+            vl_rec_max_concurrency=1,          # one block at a time: CPU
             device="cpu",
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_chart_recognition=False,
-            # togliamo intestazioni/pie' di pagina/numeri, ma TENIAMO le note
+            # remove headers/footers/numbers, but KEEP the notes
             markdown_ignore_labels=["number", "header", "header_image",
                                     "footer", "footer_image", "aside_text"],
         )
 
     def page_md(self, img, page_no: int, fig_dir: Path, fig_prefix: str):
-        """Ritorna (markdown, [nomi file delle figure ritagliate], [formule]).
-           Ogni formula 'a blocco' diventa un segnaposto {{FORMULA:id}} nel
-           testo: la versione definitiva viene scelta dopo la verifica
-           (rilettura ad alta risoluzione + Chandra + voto)."""
+        """Returns (markdown, [cropped figure file names], [formulas]).
+           Each display formula becomes a {{FORMULA:id}} placeholder in the
+           text: the final version is chosen after verification
+           (high-resolution reread + Chandra + vote)."""
         import tempfile
         formule = []
         with tempfile.TemporaryDirectory() as td:
@@ -989,7 +989,7 @@ class PaddleLayout:
                 mdd = res.markdown
                 text = mdd.get("markdown_texts", "") or ""
                 for rel, pil in (mdd.get("markdown_images") or {}).items():
-                    if rel not in text:          # es. logo nel pie' di pagina: scartato
+                    if rel not in text:          # e.g. logo in the footer: discarded
                         continue
                     fig_dir.mkdir(parents=True, exist_ok=True)
                     name = f"p{page_no:04d}_" + Path(rel).name
@@ -1010,11 +1010,11 @@ class PaddleLayout:
                     f"> **[Figura — pag. {page_no}]** {{{{DESCR:{name}}}}}\n\n")
         md = re.sub(r"<div[^>]*>\s*(<img[^>]*>)\s*</div>", r"\1", md)
         md = re.sub(r"<img[^>]*?src=\"([^\"]+)\"[^>]*>", _img, md)
-        # segnaposto formule: sempre su una riga a se' (eventuali $ attorno via)
+        # formula placeholders: always on a line of their own (any surrounding $ removed)
         md = re.sub(r"\${0,2}\s*\{\{FORMULA:([^}]+)\}\}\s*\${0,2}",
                     lambda m: "\n\n{{FORMULA:" + m.group(1) + "}}\n\n", md)
         inline_ids = {f["id"] for f in formule if not f["display"]}
-        if inline_ids:   # le formule "in riga" restano nel paragrafo
+        if inline_ids:   # inline formulas stay in the paragraph
             md = re.sub(r"\n\n\{\{FORMULA:([^}]+)\}\}\n\n",
                         lambda m: (" {{FORMULA:" + m.group(1) + "}} ") if m.group(1) in inline_ids
                         else m.group(0), md)
@@ -1025,14 +1025,14 @@ _CIRCLED = {i: chr(0x2460 + i - 1) for i in range(1, 21)}
 
 
 def clean_md(md: str) -> str:
-    """Ritocchi generali: formule inline senza spazi interni ($ x $ -> $x$),
-       \\textcircled{n} (non supportato da KaTeX) -> ①, righe vuote multiple."""
+    """General touch-ups: inline formulas with no inner spaces ($ x $ -> $x$),
+       \\textcircled{n} (not supported by KaTeX) -> ①, multiple empty lines."""
     md = normalize_math(md)
     md = re.sub(r"\\textcircled\{\s*(\d+)\s*\}",
                 lambda m: _CIRCLED.get(int(m.group(1)), f"({m.group(1)})"), md)
     md = re.sub(r"\$\$\s*(.+?)\s*\$\$", lambda m: "\n$$\n" + m.group(1).strip() + "\n$$\n",
                 md, flags=re.S)
-    # coppie $...$ prese in ordine da sinistra (mai "tra" due formule)
+    # $...$ pairs taken in order from the left (never "between" two formulas)
     md = re.sub(r"(?<!\$)\$(?!\$)([^$\n]*?)(?<!\$)\$(?!\$)",
                 lambda m: "$" + m.group(1).strip() + "$", md)
     md = fix_list_markers(md)
@@ -1040,10 +1040,10 @@ def clean_md(md: str) -> str:
 
 
 # ----------------------------------------------------------------------------
-# Riconoscere una pagina "illeggibile" per Paddle (tipicamente scritta a mano):
-# parole che non esistono nella lingua del documento e caratteri di alfabeti
-# estranei (cirillico, cinese...) che il modello inventa quando non capisce.
-# Usa 'wordfreq' (italiano, inglese, francese, spagnolo, tedesco) se presente.
+# Recognizing a page that is "unreadable" for Paddle (typically handwritten):
+# words that do not exist in the document's language and characters of
+# foreign alphabets (Cyrillic, Chinese...) the model invents when it does not understand.
+# Uses 'wordfreq' (Italian, English, French, Spanish, German) if present.
 # ----------------------------------------------------------------------------
 _LINGUE = ["it", "en", "fr", "es", "de"]
 
@@ -1055,7 +1055,7 @@ def leggibilita(md: str) -> dict:
     lettere = [c for c in testo if c.isalpha()]
     estranei = [c for c in lettere if not ("a" <= c.lower() <= "z" or "\u00c0" <= c <= "\u024f")]
     frac_estranei = len(estranei) / max(1, len(lettere))
-    # solo parole lunghe (>= 5 lettere): quelle corte esistono quasi sempre
+    # long words only (>= 5 letters): short ones nearly always exist
     parole = [w.lower() for w in re.findall(r"[A-Za-zÀ-ÿ]{5,}", testo)]
     info = {"parole": len(parole), "estranei": round(frac_estranei, 3), "note": None}
     try:
@@ -1068,7 +1068,7 @@ def leggibilita(md: str) -> dict:
                     best = (lg, ok)
             info["lingua"], info["parole_note"] = best[0], round(best[1], 2)
     except Exception:
-        info["note"] = "wordfreq non installato"
+        info["note"] = "wordfreq not installed"
     illeg = (frac_estranei > 0.01
              or (info.get("parole_note") is not None and info["parole"] >= 8
                  and info["parole_note"] < 0.90))
@@ -1076,19 +1076,19 @@ def leggibilita(md: str) -> dict:
     return info
 
 
-# righe di intestazione / pie' di pagina da eliminare (Paddle le trascrive)
+# header/footer lines to remove (Paddle transcribes them)
 _PAGE_NUM_RE = re.compile(r"^\s*(pag(\.|ina)?\s*)?\d+\s*(a|di|/|of)\s*\d+\s*$", re.I)
 
 
 def strip_running_lines(pages_md: dict[int, str]) -> dict[int, str]:
-    """Toglie intestazioni / pie' di pagina: righe IDENTICHE che compaiono
-       nelle prime/ultime 2 righe di almeno meta' delle pagine (minimo 3), e
-       le righe tipo 'Pag. 12 a 506'. Non tocca mai il resto del testo."""
+    """Removes headers/footers: IDENTICAL lines appearing in
+       the first/last 2 lines of at least half the pages (minimum 3), and
+       lines such as 'Pag. 12 a 506'. Never touches the rest of the text."""
     from collections import Counter
     def norm(l):
         return re.sub(r"\s+", " ", l.strip().lower())
     def edges(md):
-        # mai figure (>), formule ($), immagini, tabelle o commenti
+        # never figures (>), formulas ($), images, tables or comments
         idx = [i for i, l in enumerate(md.splitlines())
                if l.strip() and not l.lstrip().startswith((">", "$", "!", "|", "<!--", "\\"))]
         return set(idx[:2] + idx[-2:]) if len(idx) > 4 else set()
@@ -1111,24 +1111,24 @@ def strip_running_lines(pages_md: dict[int, str]) -> dict[int, str]:
 
 
 # ----------------------------------------------------------------------------
-# VERIFICA DELLE FORMULE (pagine fatte da Paddle)
-# Ogni formula "a blocco" viene letta TRE volte, da lettori diversi:
-#   1) paddle     : la lettura della pipeline (pagina a 200 dpi)
-#   2) paddle_hr  : Paddle di nuovo, sul ritaglio a 300 dpi (dettagli piu' nitidi)
-#   3) chandra    : Chandra OCR 2 sul ritaglio a 300 dpi (modello diverso)
-# Le letture vengono confrontate "nel contenuto" (spazi, \left/\right,
-# \dfrac/\frac, \text{...} ecc. non contano). Se Paddle e Chandra sono
-# d'accordo la formula e' CONFERMATA; altrimenti vince la maggioranza; se non
-# c'e' maggioranza la formula e' DUBBIA: nel .md resta un commento con le
-# letture alternative e finisce nel file <nome>_da_controllare.md, con il
-# ritaglio dell'immagine e uno spazio per la correzione (che il programma
-# applica da solo al giro successivo, senza rifare l'OCR).
-#   TOMD2_VERIFICA_FORMULE = tutte (default) | dubbie (Chandra solo dove le
-#   due letture di Paddle non coincidono) | paddle (niente Chandra) | 0 (off)
+# FORMULA VERIFICATION (pages done by Paddle)
+# Each display formula is read THREE times, by different readers:
+#   1) paddle     : the pipeline's reading (page at 200 dpi)
+#   2) paddle_hr  : Paddle again, on the crop at 300 dpi (sharper details)
+#   3) chandra    : Chandra OCR 2 on the crop at 300 dpi (a different model)
+# The readings are compared "by content" (spaces, \left/\right,
+# \dfrac/\frac, \text{...} etc. do not count). If Paddle and Chandra
+# agree the formula is CONFIRMED; otherwise the majority wins; if there is no
+# majority the formula is DOUBTFUL: a comment with the alternative readings
+# stays in the .md and it goes into the <name>_da_controllare.md file, with the
+# image crop and a space for the correction (which the program
+# applies by itself on the next run, without redoing the OCR).
+#   TOMD2_VERIFICA_FORMULE = tutte (default) | dubbie (Chandra only where the
+#   two Paddle readings differ) | paddle (no Chandra) | 0 (off)
 # ----------------------------------------------------------------------------
 VERIFICA_FORMULE = os.environ.get("TOMD2_VERIFICA_FORMULE", "tutte").strip().lower()
 FORMULA_DPI = int(os.environ.get("TOMD2_FORMULA_DPI", "300"))
-LAYOUT_CACHE_V = 2            # versione dei dati in cache della modalita' layout
+LAYOUT_CACHE_V = 2            # version of the cached data for layout mode
 CHANDRA_OCR_PROMPT = "OCR this image to HTML.\n\n" + _PROMPT_ENDING
 
 
@@ -1136,9 +1136,9 @@ _SINGOLI_RE = re.compile(r"(?<![\\A-Za-z0-9])([A-Za-z0-9](?: [A-Za-z0-9])+)(?![A
 
 
 def _graffe_doppie(s: str) -> str:
-    """'{ { X } }' -> '{X}' (graffe ridondanti, anche annidate)."""
+    """'{ { X } }' -> '{X}' (redundant braces, also nested)."""
     for _ in range(20):
-        # coppie di graffe: posizione di apertura -> chiusura
+        # brace pairs: opening position -> closing position
         st, match = [], {}
         for i, c in enumerate(s):
             if c == "{" and (i == 0 or s[i - 1] != "\\"):
@@ -1154,7 +1154,7 @@ def _graffe_doppie(s: str) -> str:
                 k = match[j] + 1
                 while k < len(s) and s[k] == " ":
                     k += 1
-                if k == c:            # { {X} } : la coppia esterna e' inutile
+                if k == c:            # { {X} } : the outer pair is useless
                     togli.update((o, c))
         if not togli:
             break
@@ -1163,10 +1163,10 @@ def _graffe_doppie(s: str) -> str:
 
 
 def compatta_tex(s: str) -> str:
-    """LaTeX 'a spazi' (stile im2latex, tipico di Qwen):
+    """'Spaced' LaTeX (im2latex style, typical of Qwen):
        '\\frac { 1 } { e _ { 0 } }' -> '\\frac{1}{e_{0}}',
        '\\operatorname* { d e t }' -> '\\det', '{ { { C } } }' -> '{C}'.
-       Il testo dentro \\text{...} non viene toccato."""
+       Text inside \\text{...} is not touched."""
     if not s:
         return s
     s = re.sub(r"[ \t]+", " ", s)
@@ -1192,17 +1192,17 @@ def compatta_tex(s: str) -> str:
 
 
 def compatta_md(md: str) -> str:
-    """Applica compatta_tex alle sole parti matematiche di un testo Markdown."""
+    """Applies compatta_tex only to the math parts of a Markdown text."""
     md = re.sub(r"\$\$(.+?)\$\$", lambda m: "$$" + compatta_tex(m.group(1)) + "$$", md or "",
                 flags=re.S)
     return re.sub(r"(?<!\$)\$([^$\n]+?)\$(?!\$)", lambda m: "$" + compatta_tex(m.group(1)) + "$", md)
 
 
 def tex_core(s: str) -> str:
-    """Toglie i delimitatori ($$ $ \\[ \\] \\( \\)) attorno a una formula."""
+    """Removes the delimiters ($$ $ \\[ \\] \\( \\)) around a formula."""
     s = (s or "").strip()
-    # "\text" letto come TAB+"ext", "\frac" come form-feed+"rac" ecc.:
-    # ripristino i comandi LaTeX rovinati da un doppio "unescape"
+    # "\text" read as TAB+"ext", "\frac" as form-feed+"rac" etc.:
+    # restores the LaTeX commands ruined by a double "unescape"
     s = re.sub(r"[\t\x0c\x08\r\x0b\x07](?=[A-Za-z])",
                lambda m: {"\t": "\\t", "\x0c": "\\f", "\x08": "\\b", "\r": "\\r",
                           "\x0b": "\\v", "\x07": "\\a"}[m.group(0)], s)
@@ -1242,7 +1242,7 @@ _TEX_MAP = {
     "′": "'", "\\colon": ":", "\\vcentcolon": ":", "\\dots": "\\ldots", "\\cdots": "\\ldots",
     "\\simeq": "\\cong", "\\approx": "\\cong",
 }
-# funzioni con nome: \arcsin == \operatorname{arcsin} == arcsin
+# named functions: \arcsin == \operatorname{arcsin} == arcsin
 _TEX_FUNZ = {"sin", "cos", "tan", "cot", "sec", "csc", "arcsin", "arccos", "arctan",
              "sinh", "cosh", "tanh", "coth", "log", "ln", "exp", "det", "lim", "max",
              "min", "sup", "inf", "arg", "deg", "dim", "ker", "sgn", "tg", "arctg",
@@ -1251,14 +1251,14 @@ _TEX_FUNZ_ALIAS = {"asin": "arcsin", "acos": "arccos", "atan": "arctan"}
 
 
 def tex_tokens(tex: str) -> list[str]:
-    """Formula -> sequenza di 'simboli di contenuto' per il confronto."""
+    """Formula -> sequence of 'content symbols' for the comparison."""
     s = tex_core(tex)
     s = re.sub(r"\\tag\*?\{[^}]*\}", " ", s)
-    # numero dell'equazione scritto in fondo ("\quad (3.2)"): non conta
+    # equation number written at the end ("\quad (3.2)"): does not count
     s = re.sub(r"(?:\\q?quad|\\hfill|~|\s)*\(\s*\d+(?:\.\d+)+\s*\)\s*$", " ", s)
     s = re.sub(r"(?:\\q?quad|\\hfill)+\s*\(\s*\d+\s*\)\s*$", " ", s)
     s = re.sub(r"\\(begin|end)\{[^}]*\}(\{[^}]*\})?", " ", s)
-    s = re.sub(r"\\(left|right|bigl|bigr|Bigl|Bigr|big|Big)\s*\.", " ", s)   # \left. invisibile
+    s = re.sub(r"\\(left|right|bigl|bigr|Bigl|Bigr|big|Big)\s*\.", " ", s)   # invisible \left.
     s = s.replace("°", "^\\circ")
     s = re.sub(r"\\(hspace|vspace)\*?\{[^}]*\}", " ", s)
     s = re.sub(r"\^\s*\{?\s*\\prime\s*\\prime\s*\}?", "''", s)
@@ -1272,7 +1272,7 @@ def tex_tokens(tex: str) -> list[str]:
         if t in _TEX_DROP:
             continue
         if t.startswith("\\") and t[1:] in _TEX_FUNZ:
-            # \sin, \operatorname{sin} e "s i n" scritti a lettere sono la stessa cosa
+            # \sin, \operatorname{sin} and "s i n" written in letters are the same thing
             out.extend(_TEX_FUNZ_ALIAS.get(t[1:], t[1:]))
             continue
         out.append(t)
@@ -1289,14 +1289,14 @@ def tex_valida(tex: str) -> bool:
 
 
 def tex_differenze(a: str, b: str, max_n: int = 3) -> str:
-    """'\\sin -> arcsin' : i pezzi in cui due letture differiscono."""
+    """'\\sin -> arcsin' : the pieces in which two readings differ."""
     import difflib
     ta, tb = tex_tokens(a), tex_tokens(b)
     out = []
     for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, ta, tb, autojunk=False).get_opcodes():
         if op == "equal":
             continue
-        # un simbolo di contesto prima e dopo, per capire DOVE sta la differenza
+        # one symbol of context before and after, to see WHERE the difference is
         a0, b0 = max(0, i1 - 1), max(0, j1 - 1)
         a1, b1 = min(len(ta), i2 + 1), min(len(tb), j2 + 1)
         out.append(f"«{' '.join(ta[a0:a1])}» ↔ «{' '.join(tb[b0:b1])}»")
@@ -1307,7 +1307,7 @@ def tex_differenze(a: str, b: str, max_n: int = 3) -> str:
 
 
 def chandra_tex(raw: str) -> str:
-    """LaTeX dalle risposte di Chandra su un ritaglio di formula."""
+    """LaTeX from Chandra's answers on a formula crop."""
     import html as _h
     raw = _strip_fences(raw or "")
     maths = re.findall(r"<math[^>]*>(.*?)</math>", raw, flags=re.S)
@@ -1326,9 +1326,9 @@ _MODELLI_EXTRA = {"unimernet": "UniMERNet", "ppformulanet": "PP-FormulaNet_plus-
 
 
 def lettori_extra_formule(formule: list[dict], form_dir: Path, cache_dir: Path):
-    """Lettori SPECIALIZZATI in formule (PaddleOCR, gia' installato): UniMERNet
-       (addestrato anche su formule scritte a mano) e PP-FormulaNet. Piccoli e
-       veloci: secondi per formula invece di minuti. Solo sulle formule dubbie."""
+    """Readers SPECIALIZED in formulas (PaddleOCR, already installed): UniMERNet
+       (also trained on handwritten formulas) and PP-FormulaNet. Small and
+       fast: seconds per formula instead of minutes. Only on doubtful formulas."""
     for chi in LETTORI_EXTRA:
         nome = _MODELLI_EXTRA.get(chi)
         if not nome:
@@ -1347,40 +1347,40 @@ def lettori_extra_formule(formule: list[dict], form_dir: Path, cache_dir: Path):
         try:
             _import_paddle_stack()
             from paddleocr import FormulaRecognition
-            _log(f"  [{nome}] carico il modello (la prima volta lo scarica) ...")
+            _log(f"  [{nome}] loading the model (downloaded the first time) ...")
             mod = FormulaRecognition(model_name=nome, device="cpu")
         except Exception as e:
-            _log(f"  [{nome}] non disponibile ({type(e).__name__}: {e}): salto")
+            _log(f"  [{nome}] not available ({type(e).__name__}: {e}): salto")
             continue
-        _log(f"  [{nome}] rilegge {len(todo)} formule dubbie ...")
+        _log(f"  [{nome}] rilegge {len(todo)} doubtful formulas ...")
         t_all = time.time()
         for i, f in enumerate(todo, 1):
             try:
                 res = next(iter(mod.predict(str(form_dir / f["crop"]))))
                 t = tex_core(str(res["rec_formula"] or ""))
             except Exception as e:
-                _log(f"    [{nome} {f['id']}] errore: {e}")
+                _log(f"    [{nome} {f['id']}] error: {e}")
                 continue
             (cdir / (f["id"] + ".txt")).write_text(t, encoding="utf-8")
             f[chi] = t
             if i % 20 == 0 or i == len(todo):
                 media = (time.time() - t_all) / i
-                _log(f"  [{nome}] {i}/{len(todo)} | stima residua {media*(len(todo)-i)/60:.0f} min")
+                _log(f"  [{nome}] {i}/{len(todo)} | time left {media*(len(todo)-i)/60:.0f} min")
 
 
 def scegli_formula(f: dict) -> tuple[str, str, str]:
-    """Ritorna (formula scelta, stato, nota). Stati: corretta (a mano),
-       confermata, maggioranza, coerente (solo Paddle), dubbia."""
+    """Returns (chosen formula, status, note). Statuses: corrected (by hand),
+       confirmed, majority, consistent (Paddle only), doubtful."""
     if f.get("corretta"):
         return f["corretta"], "corretta", ""
     letture = {k: tex_core(f.get(k)) for k in LETTORI_FORMULA
                if f.get(k) and tex_valida(tex_core(f.get(k)))}
     if not letture:
-        return f.get("paddle") or "", "dubbia", "nessuna lettura valida"
+        return f.get("paddle") or "", "dubbia", "no valid reading"
     sig = {k: tuple(tex_tokens(v)) for k, v in letture.items()}
     same = lambda a, b: a in sig and b in sig and sig[a] == sig[b]
 
-    def pick(keys):        # tra letture equivalenti: la scritta meglio
+    def pick(keys):        # among equivalent readings: the best written one
         return letture[max(keys, key=lambda k: (_stile_tex(letture[k]), k == "paddle"))]
     if same("paddle", "chandra"):
         return tex_bella(pick([k for k in sig if sig[k] == sig["paddle"]])), "confermata", ""
@@ -1388,16 +1388,16 @@ def scegli_formula(f: dict) -> tuple[str, str, str]:
         nota = ("paddle(200dpi): " + tex_differenze(letture["paddle_hr"], letture["paddle"])
                 if "paddle" in letture else "")
         return tex_bella(pick(["paddle_hr", "chandra"])), "maggioranza", nota
-    if "glm" in sig:           # l'arbitro (GLM) si schiera con qualcuno
+    if "glm" in sig:           # the referee (GLM) sides with someone
         alleati = [k for k in sig if k != "glm" and sig[k] == sig["glm"]]
         if alleati:
             altri = [k for k in sig if sig[k] != sig["glm"]]
             nota = " | ".join(f"{k}: {tex_differenze(letture['glm'], letture[k])}" for k in altri)
             return tex_bella(pick(alleati + ["glm"])), "arbitrata", nota
-    # voto generale (con i lettori specializzati UniMERNet / PP-FormulaNet):
-    # vince il gruppo di letture identiche piu' numeroso, se e' unico e non e'
-    # fatto solo di modelli Baidu (Paddle, Paddle 300 dpi, PP-FormulaNet), che
-    # tendono a sbagliare allo stesso modo.
+    # general vote (with the specialized readers UniMERNet / PP-FormulaNet):
+    # the largest group of identical readings wins, if it is unique and not
+    # made only of Baidu models (Paddle, Paddle 300 dpi, PP-FormulaNet), which
+    # they tend to make the same mistakes.
     gruppi = {}
     for k in sig:
         gruppi.setdefault(sig[k], []).append(k)
@@ -1412,13 +1412,13 @@ def scegli_formula(f: dict) -> tuple[str, str, str]:
         if same("paddle", "paddle_hr") or len(letture) == 1:
             k0 = "paddle" if "paddle" in letture else next(iter(letture))
             stato = "coerente" if f.get("chandra_fatto") is None else "dubbia"
-            nota = "" if stato == "coerente" else "Chandra non ha dato una lettura valida"
+            nota = "" if stato == "coerente" else "Chandra gave no valid reading"
             return tex_bella(letture[k0]), stato, nota
-    # nessun accordo. Con 3 letture tutte diverse vince quella piu' "vicina"
-    # alle altre due (distanza di modifica in simboli): in pratica, sui punti
-    # contestati decide la terza lettura. A parita' vince Chandra (modello
-    # piu' grande, letto sul ritaglio ad alta risoluzione).
-    # Paddle e Paddle-300dpi uguali contano come UN voto solo (stesso modello)
+    # no agreement. With 3 readings all different, the one "closest"
+    # to the other two wins (edit distance in symbols): in practice, on the
+    # disputed points the third reading decides. On a tie Chandra wins (the larger
+    # model, read on the high-resolution crop).
+    # Paddle and Paddle-300dpi equal count as ONE vote only (same model)
     pool = [k for k in sig if not (k == "paddle_hr" and same("paddle", "paddle_hr"))]
     if len(pool) <= 2 and same("paddle", "paddle_hr"):
         best = "paddle"
@@ -1431,7 +1431,7 @@ def scegli_formula(f: dict) -> tuple[str, str, str]:
 
 
 def _lev(a, b) -> int:
-    """Distanza di modifica tra due sequenze di simboli."""
+    """Edit distance between two symbol sequences."""
     if len(a) < len(b):
         a, b = b, a
     prev = list(range(len(b) + 1))
@@ -1448,7 +1448,7 @@ def _stile_tex(t: str) -> int:
 
 
 def tex_bella(t: str) -> str:
-    """Ritocchi di forma: _{angolo~di~Mach} -> _{\\text{angolo di Mach}}."""
+    """Form touch-ups: _{angolo~di~Mach} -> _{\\text{angolo di Mach}}."""
     t = re.sub(r"([_^])\{\s*((?:[A-Za-zÀ-ÿ]+\s*~\s*)+[A-Za-zÀ-ÿ]+)\s*\}",
                lambda m: m.group(1) + "{\\text{" + re.sub(r"\s*~\s*", " ", m.group(2)) + "}}", t)
     return t
@@ -1456,8 +1456,8 @@ def tex_bella(t: str) -> str:
 
 def paddle_rilettura_formule(srv, formule: list[dict], img, img_hr, form_dir: Path,
                              page_no: int):
-    """Ritaglia ogni formula dalla pagina a FORMULA_DPI, la salva (serve a
-       Chandra e al file da controllare) e la fa rileggere a Paddle."""
+    """Crops each formula from the page at FORMULA_DPI, saves it (needed by
+       Chandra and the review file) and has Paddle reread it."""
     if not formule:
         return
     form_dir.mkdir(parents=True, exist_ok=True)
@@ -1484,13 +1484,13 @@ def paddle_rilettura_formule(srv, formule: list[dict], img, img_hr, form_dir: Pa
             if usage.get("stopped") != "loop":
                 f["paddle_hr"] = tex_core(normalize_math(raw).replace("$$", "").strip())
         except Exception as e:
-            _log(f"    [formula {f['id']}] rilettura Paddle fallita: {e}")
-    _log(f"    [paddle p.{page_no}] {len(formule)} formule ritagliate e rilette a {FORMULA_DPI} dpi")
+            _log(f"    [formula {f['id']}] Paddle reread failed: {e}")
+    _log(f"    [paddle p.{page_no}] {len(formule)} formulas cropped and reread at {FORMULA_DPI} dpi")
 
 
 def chandra_verifica_formule(formule: list[dict], form_dir: Path, cache_dir: Path,
                              threads=None, gpu=False):
-    """Fa leggere a Chandra i ritagli delle formule (con cache)."""
+    """Has Chandra read the formula crops (with cache)."""
     from PIL import Image
     cdir = cache_dir / "chandra_formule"
     cdir.mkdir(parents=True, exist_ok=True)
@@ -1509,7 +1509,7 @@ def chandra_verifica_formule(formule: list[dict], form_dir: Path, cache_dir: Pat
         todo.append(f)
     if not todo:
         return
-    _log(f"  [verifica formule] Chandra rilegge {len(todo)} formule (sui ritagli a {FORMULA_DPI} dpi) ...")
+    _log(f"  [formula check] Chandra rereads {len(todo)} formulas (on the crops at {FORMULA_DPI} dpi) ...")
     t_all = time.time()
     with LlamaServer("chandra", threads=threads, gpu=gpu) as srv:
         for i, f in enumerate(todo, 1):
@@ -1520,7 +1520,7 @@ def chandra_verifica_formule(formule: list[dict], form_dir: Path, cache_dir: Pat
                 raw, usage = srv.ocr(im, prompt=CHANDRA_OCR_PROMPT, max_tokens=900,
                                      label=f"[formula {f['id']}]")
             except Exception as e:
-                _log(f"    [formula {f['id']}] Chandra fallito: {e}")
+                _log(f"    [formula {f['id']}] Chandra failed: {e}")
                 continue
             if usage.get("stopped") == "loop":
                 raw = ""
@@ -1528,8 +1528,8 @@ def chandra_verifica_formule(formule: list[dict], form_dir: Path, cache_dir: Pat
             f["chandra"] = chandra_tex(raw)
             f["chandra_fatto"] = True
             media = (time.time() - t_all) / i
-            _log(f"  [verifica formule] {i}/{len(todo)} in {time.time()-t0:.0f} s"
-                 f" | stima residua {media*(len(todo)-i)/60:.0f} min")
+            _log(f"  [formula check] {i}/{len(todo)} in {time.time()-t0:.0f} s"
+                 f" | time left {media*(len(todo)-i)/60:.0f} min")
 
 
 def _formula_md(f: dict, tex: str, stato: str, nota: str) -> str:
@@ -1544,8 +1544,8 @@ def _formula_md(f: dict, tex: str, stato: str, nota: str) -> str:
         alt = "; ".join(f"{k}: `{f[k].replace('`', chr(39))}`"
                         for k in LETTORI_FORMULA
                         if f.get(k) and tex_tokens(f[k]) != tex_tokens(tex))
-        out += (f"\n> ⚠ **Formula incerta** ({f['id']}): le letture automatiche non concordano "
-                f"({nota}). Altre letture: {alt}. *Ricava quella giusta dal contesto.*\n")
+        out += (f"\n> ⚠ **Uncertain formula** ({f['id']}): the automatic readings do not agree "
+                f"({nota}). Other readings: {alt}. *Work out the right one from the context.*\n")
     return out + "\n"
 
 
@@ -1554,12 +1554,12 @@ _CORR_RE = re.compile(r"^###\s+(p\d{4}_f\d{2})\b(?:(?!\n###).)*?\nCORREZIONE[^\n
 
 
 def leggi_correzioni(report: Path, cache_dir: Path, scelte_auto: dict) -> dict:
-    """Legge le correzioni scritte nel file _da_controllare.md (a mano o da
-       Claude) e le salva in cache: valgono anche se il file viene rigenerato.
-       E' una correzione SOLO se il testo e' diverso da quello che il
-       programma aveva scritto nel file l'ultima volta (report_scritto.json):
-       cosi' un cambio di scelta automatica non viene scambiato per una
-       correzione fatta a mano."""
+    """Reads the corrections written in the _da_controllare.md file (by hand or by
+       Claude) and saves them in the cache: they also apply if the file is regenerated.
+       It is a correction ONLY if the text differs from what the
+       program wrote in the file last time (report_scritto.json):
+       this way a change of automatic choice is not mistaken for a
+       manual correction."""
     return _leggi_corr(report, cache_dir, scelte_auto, _CORR_RE,
                        "correzioni_formule_v2.json",
                        lambda a, b: tex_tokens(a) == tex_tokens(b))
@@ -1584,7 +1584,7 @@ def _leggi_corr(report: Path, cache_dir: Path, auto: dict, regex, nome_store: st
             if not t or k not in auto or k not in scritto:
                 continue
             if not uguali(t, scritto[k]):
-                corr[k] = t                      # l'hai cambiato tu (o Claude)
+                corr[k] = t                      # you changed it (or Claude did)
     if corr:
         store.parent.mkdir(parents=True, exist_ok=True)
         store.write_text(json.dumps(corr, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -1592,9 +1592,9 @@ def _leggi_corr(report: Path, cache_dir: Path, auto: dict, regex, nome_store: st
 
 
 def parole_sospette(md: str, max_n: int = 25, freq_doc=None) -> list[str]:
-    """Parole che non esistono in nessuna delle lingue principali (possibili
-       errori di lettura, es. 'semolno'). I termini tecnici che ricorrono piu'
-       volte nel documento (es. 'omentropici') non vengono segnalati."""
+    """Words that do not exist in any of the main languages (possible
+       misreadings, e.g. 'semolno'). Technical terms that recur several
+       times in the document (e.g. 'omentropici') are not flagged."""
     try:
         from wordfreq import zipf_frequency
     except Exception:
@@ -1610,7 +1610,7 @@ def parole_sospette(md: str, max_n: int = 25, freq_doc=None) -> list[str]:
             continue
         viste.add(k)
         if w[0].isupper() and not w.isupper():
-            continue            # nomi propri (Mach, Prandtl, ...)
+            continue            # proper names (Mach, Prandtl, ...)
         if freq_doc is not None and freq_doc.get(k, 0) >= 2:
             continue
         if max(zipf_frequency(k, lg) for lg in _LINGUE) < 0.6:
@@ -1626,8 +1626,8 @@ def scrivi_da_controllare(report: Path, form_prefix: str, voci: list[dict],
                           voci_fig: list[dict] | None = None, ctrl_prefix: str = "",
                           cache_dir: Path | None = None):
     voci_blocchi = voci_blocchi or []
-    scritto = {}          # cosa il programma scrive sotto CORREZIONE (per capire poi
-                          # se l'hai cambiato tu)
+    scritto = {}          # what the program writes under CORREZIONE (to tell later
+                          # whether you changed it)
     voci_fig = voci_fig or []
 
     def conta(vv):
@@ -1635,15 +1635,15 @@ def scrivi_da_controllare(report: Path, form_prefix: str, voci: list[dict],
         for v in vv:
             c[v["stato"]] = c.get(v["stato"], 0) + 1
         return ", ".join(f"{k} {n}" for k, n in sorted(c.items())) or "nessuna"
-    L = [f"# Da controllare — {report.stem.replace('_da_controllare', '')}", "",
-         "Generato da ocr_vlm.py.", "",
-         f"- Formule stampate: {conta(voci)}",
-         f"- Blocchi scritti a mano: {conta(voci_blocchi)}",
-         f"- Figure: {conta(voci_fig)}", "",
-         "**Come si usa:** guarda il ritaglio e, se serve, scrivi la versione giusta sotto "
-         "*CORREZIONE* (formule tra i `$$`, testo e descrizioni dentro il riquadro ```). "
-         "Poi rilancia la stessa conversione: usa la cache (non rifa' l'OCR) e applica le "
-         "correzioni. Puoi anche dare questo file a Claude e fargli correggere SOLO questi punti.", ""]
+    L = [f"# To review — {report.stem.replace('_da_controllare', '')}", "",
+         "Generated by ocr_vlm.py.", "",
+         f"- Printed formulas: {conta(voci)}",
+         f"- Handwritten blocks: {conta(voci_blocchi)}",
+         f"- Figures: {conta(voci_fig)}", "",
+         "**How to use it:** look at the crop and, if needed, write the right version under "
+         "*CORREZIONE* (formulas between the `$$`, text and descriptions inside the ``` box). "
+         "Then run the same conversion again: it uses the cache (does not redo the OCR) and applies the "
+         "corrections. You can also give this file to Claude and have it correct ONLY these points.", ""]
 
     def blocco_formula(v):
         f = v["f"]
@@ -1655,7 +1655,7 @@ def scrivi_da_controllare(report: Path, form_prefix: str, voci: list[dict],
         for k in LETTORI_FORMULA:
             if f.get(k):
                 out.append(f"- **{k}**: `{f[k]}`")
-        out += ["", "CORREZIONE (lascia com'e' se la formula e' giusta):", "$$", v["scelta"], "$$", ""]
+        out += ["", "CORREZIONE (leave as it is if the formula is right):", "$$", v["scelta"], "$$", ""]
         scritto[f["id"]] = v["scelta"]
         return out
 
@@ -1665,11 +1665,11 @@ def scrivi_da_controllare(report: Path, form_prefix: str, voci: list[dict],
         if b.get("crop"):
             out += [f"![blocco {b['id']}]({form_prefix}/{b['crop']})", ""]
         if v["nota"]:
-            out += [f"Differenze nelle formule: {v['nota']}", ""]
+            out += [f"Differences in the formulas: {v['nota']}", ""]
         for k in ("chandra", "qwen", "glm"):
             if b.get(k):
                 out += [f"**{k}:**", "", "```text", b[k], "```", ""]
-        out += ["CORREZIONE (testo del blocco in Markdown; lascia com'e' se e' giusto):",
+        out += ["CORREZIONE (block text in Markdown; leave as it is if right):",
                 "```markdown", v["scelta"], "```", ""]
         scritto[b["id"]] = v["scelta"]
         return out
@@ -1678,25 +1678,25 @@ def scrivi_da_controllare(report: Path, form_prefix: str, voci: list[dict],
         j = v["j"]
         out = [f"### FIG {j['key']} — pagina {j['page']} ({v['stato']})", ""]
         if j.get("crop"):
-            out += [f"![figura]({ctrl_prefix}/{j['crop']})", ""]
+            out += [f"![figure]({ctrl_prefix}/{j['crop']})", ""]
         if v["nota"]:
-            out += ["Il controllore (GLM) segnala:", "", v["nota"], ""]
-        out += ["CORREZIONE (descrizione; lascia com'e' se va bene):",
+            out += ["The checker (GLM) reports:", "", v["nota"], ""]
+        out += ["CORREZIONE (description; leave as it is if fine):",
                 "```text", v["scelta"], "```", ""]
         scritto[j["key"]] = v["scelta"]
         return out
 
     sezioni = [
-        ("Formule dubbie — le letture non concordano", voci, ("dubbia",), blocco_formula),
-        ("Blocchi scritti a mano dubbi", voci_blocchi, ("dubbia",), blocco_mano),
-        ("Figure contestate dal controllore", voci_fig, ("contestata", "non verificata"), blocco_fig),
-        ("Formule decise a maggioranza o dall'arbitro — controllo veloce", voci,
+        ("Doubtful formulas — the readings do not agree", voci, ("dubbia",), blocco_formula),
+        ("Doubtful handwritten blocks", voci_blocchi, ("dubbia",), blocco_mano),
+        ("Figures disputed by the checker", voci_fig, ("contestata", "non verificata"), blocco_fig),
+        ("Formulas decided by majority or by the referee — quick check", voci,
          ("maggioranza", "arbitrata"), blocco_formula),
-        ("Blocchi a mano decisi dall'arbitro — controllo veloce", voci_blocchi, ("arbitrata",),
+        ("Handwritten blocks decided by the referee — quick check", voci_blocchi, ("arbitrata",),
          blocco_mano),
-        ("Gia' corretti (modificabili)", voci, ("corretta",), blocco_formula),
-        ("Blocchi gia' corretti (modificabili)", voci_blocchi, ("corretta",), blocco_mano),
-        ("Figure gia' corrette (modificabili)", voci_fig, ("corretta",), blocco_fig),
+        ("Already corrected (editable)", voci, ("corretta",), blocco_formula),
+        ("Blocks already corrected (editable)", voci_blocchi, ("corretta",), blocco_mano),
+        ("Figures already corrected (editable)", voci_fig, ("corretta",), blocco_fig),
     ]
     vuoto = True
     for titolo, vv, stati, fn in sezioni:
@@ -1709,13 +1709,13 @@ def scrivi_da_controllare(report: Path, form_prefix: str, voci: list[dict],
     pp = {p: w for p, w in parole.items() if w}
     if pp:
         vuoto = False
-        L += ["## Parole sospette (non esistono in it/en/fr/es/de: possibili errori di lettura)", ""]
+        L += ["## Suspicious words (they do not exist in it/en/fr/es/de: possible misreadings)", ""]
         for p, ws in sorted(pp.items()):
             link = f" — [pagina]({pages_link[p]})" if p in pages_link else ""
             L.append(f"- pag. {p}{link}: " + ", ".join(ws))
         L.append("")
     if vuoto:
-        L.append("Nessun punto dubbio trovato.")
+        L.append("No doubtful points found.")
     report.write_text("\n".join(L) + "\n", encoding="utf-8")
     if cache_dir is not None:
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -1729,13 +1729,13 @@ _BOX_RE = re.compile(r"box_(\d+)_(\d+)_(\d+)_(\d+)")
 
 def describe_figures(page_figs: dict, page_image, cache_dir: Path, fig_dir: Path,
                      fig_desc: dict, threads=None, gpu=False):
-    """Descrive con Chandra le figure ritagliate da Paddle. Se una pagina ha
-       troppe figure (es. 12 pannelli), le descrive tutte insieme in UNA sola
-       chiamata sul riquadro che le contiene, per non metterci un'ora."""
+    """Describes with Chandra the figures cropped by Paddle. If a page has
+       too many figures (e.g. 12 panels), describes them all together in ONE
+       call on the box containing them, so as not to take an hour."""
     from PIL import Image
     cdir = cache_dir / "chandra_fig"
     cdir.mkdir(parents=True, exist_ok=True)
-    jobs = []          # (chiave_cache, immagine, [nomi figure], etichetta)
+    jobs = []          # (cache_key, image, [figure names], label)
     for p, figs in sorted(page_figs.items()):
         pending = [f for f in figs if not (cdir / (f + ".md")).exists()]
         for f in figs:
@@ -1751,7 +1751,7 @@ def describe_figures(page_figs: dict, page_image, cache_dir: Path, fig_dir: Path
                 pg = page_image(p, MODELS["paddle"]["dpi"])
                 u = (min(b[0] for b in boxes), min(b[1] for b in boxes),
                      max(b[2] for b in boxes), max(b[3] for b in boxes))
-                jobs.append((f"p{p:04d}_insieme", pg.crop(u), figs, f"p.{p} (insieme di {len(figs)} figure)"))
+                jobs.append((f"p{p:04d}_insieme", pg.crop(u), figs, f"p.{p} (group of {len(figs)} figures)"))
                 continue
         for f in pending:
             try:
@@ -1760,12 +1760,12 @@ def describe_figures(page_figs: dict, page_image, cache_dir: Path, fig_dir: Path
                 pass
     if not jobs:
         return
-    _log(f"  [ibrido] descrivo {len(jobs)} figure/gruppi con Chandra (sui ritagli) ...")
+    _log(f"  [hybrid] describing {len(jobs)} figures/groups with Chandra (on the crops) ...")
     with LlamaServer("chandra", threads=threads, gpu=gpu) as srv:
         for i, (ck, im, names, label) in enumerate(jobs, 1):
             img = scale_to_fit(im, MODELS["chandra"]["max_pixels"], min_pixels=400_000)
             t0 = time.time()
-            raw, usage = srv.ocr(img, max_tokens=2000, label=f"[figura {label}]")
+            raw, usage = srv.ocr(img, max_tokens=2000, label=f"[figure {label}]")
             (cdir / (ck + ".raw.txt")).write_text(raw, encoding="utf-8")
             desc = chandra_describe(raw)
             if usage.get("stopped") == "loop":
@@ -1775,35 +1775,35 @@ def describe_figures(page_figs: dict, page_image, cache_dir: Path, fig_dir: Path
                 fig_desc[first] = desc
                 (cdir / (first + ".md")).write_text(desc, encoding="utf-8")
                 for f in names[1:]:
-                    nota = "*(vedi la descrizione d'insieme della prima figura di questa pagina)*"
+                    nota = "*(see the overall description in the first figure on this page)*"
                     fig_desc[f] = nota
                     (cdir / (f + ".md")).write_text(nota, encoding="utf-8")
             else:
                 fig_desc[names[0]] = desc
                 (cdir / (names[0] + ".md")).write_text(desc, encoding="utf-8")
-            _log(f"  [figure] {i}/{len(jobs)} fatta in {time.time()-t0:.0f} s")
+            _log(f"  [figures] {i}/{len(jobs)} done in {time.time()-t0:.0f} s")
 
 
 # ============================================================================
-# CONTROLLORI (versione 4) — tutto locale e gratis, un modello alla volta
+# CHECKERS (version 4) — all local and free, one model at a time
 #
-#   Qwen3.5-9B      descrive le FIGURE (con il testo della pagina come
-#                   contesto) e rilegge i blocchi con formule delle pagine
-#                   SCRITTE A MANO (seconda lettura dopo Chandra).
-#   GLM-4.6V-Flash  famiglia diversa: ARBITRO quando due letture non
-#                   concordano (formule stampate, blocchi a mano) e
-#                   CONTROLLORE delle descrizioni delle figure; se trova
-#                   errori, Qwen riscrive e GLM ricontrolla.
-#   Quello che resta in disaccordo finisce in <nome>_da_controllare.md
-#   (ultimo livello: tu, oppure Claude solo su quei punti).
+#   Qwen3.5-9B      describes the FIGURES (with the page text as
+#                   context) and rereads the formula blocks of
+#                   HANDWRITTEN pages (second reading after Chandra).
+#   GLM-4.6V-Flash  a different family: REFEREE when two readings
+#                   disagree (printed formulas, handwritten blocks) and
+#                   CHECKER of the figure descriptions; if it finds
+#                   errors, Qwen rewrites and GLM checks again.
+#   Whatever still disagrees ends up in <name>_da_controllare.md
+#   (last level: you, or Claude on those points only).
 #
 #   TOMD2_DESCRIZIONI     qwen (default) | chandra | 0
 #   TOMD2_VERIFICA_FIGURE tutte (default) | 0
 #   TOMD2_ARBITRO         glm (default) | 0
 #   TOMD2_VERIFICA_MANO   1 (default) | 0
-#   TOMD2_GLOSSARIO       simboli del documento, aiuta a leggere la scrittura
-#                         a mano, es. "p pressione, a velocita' del suono,
-#                         delta=(gamma-1)/2, rho densita'"
+#   TOMD2_GLOSSARIO       document symbols, helps read handwriting,
+#                         e.g. "p pressure, a speed of sound,
+#                         delta=(gamma-1)/2, rho density"
 # ============================================================================
 DESCRIZIONI = os.environ.get("TOMD2_DESCRIZIONI", "qwen").strip().lower()
 VERIFICA_FIGURE = os.environ.get("TOMD2_VERIFICA_FIGURE", "tutte").strip().lower()
@@ -1811,40 +1811,40 @@ ARBITRO = os.environ.get("TOMD2_ARBITRO", "glm").strip().lower()
 VERIFICA_MANO = os.environ.get("TOMD2_VERIFICA_MANO", "1").strip() != "0"
 GLOSSARIO = os.environ.get("TOMD2_GLOSSARIO", "").strip()
 
-PROMPT_FIGURA = """Sei l'assistente che rende accessibili le figure di un documento tecnico-scientifico a un'intelligenza artificiale che NON puo' vedere le immagini.
-Testo della pagina intorno alla figura (serve solo a capire di cosa si parla):
+PROMPT_FIGURA = """You are the assistant that makes the figures of a technical-scientific document accessible to an artificial intelligence that CANNOT see images.
+Text of the page around the figure (only to understand what it is about):
 <<<
 {contesto}
 >>>
-Descrivi la figura IN ITALIANO con esattamente queste voci:
-Tipo: (schema disegnato a mano, grafico cartesiano, fotografia, disegno tecnico, diagramma x-t, tabella, ...)
-Etichette: TUTTE le scritte, i simboli, le lettere dei punti e i numeri visibili, trascritti esattamente come sono scritti (formule in LaTeX tra $...$), e per ciascuno a cosa si riferisce.
-Descrizione: forme, assi (nome, unita', verso, valori), curve e loro andamento, punti, linee (continue/tratteggiate, tangenti, parallele), frecce e loro verso, regioni e come sono numerate, colori se hanno un significato; posizioni relative (sopra/sotto/sinistra/destra, dentro/fuori).
-Cosa mostra: 1-3 frasi sul significato della figura rispetto al testo.
-Regole: non inventare niente che non si vede; se qualcosa non si legge scrivi [illeggibile]; il testo della pagina serve a capire, NON ad aggiungere elementi che nella figura non ci sono; non fare ipotesi sul significato di un simbolo se il testo della pagina non lo dice (niente "probabilmente", "forse", "possibile errore"): in quel caso riporta solo il simbolo; niente premesse, inizia direttamente con "Tipo:".{extra}"""
+Describe the figure IN ITALIAN with exactly these fields, keeping the field names as written:
+Tipo: (hand-drawn diagram, Cartesian graph, photograph, technical drawing, x-t diagram, table, ...)
+Etichette: ALL the visible writing, symbols, point letters and numbers, transcribed exactly as written (formulas in LaTeX between $...$), and what each refers to.
+Descrizione: shapes, axes (name, unit, direction, values), curves and their trend, points, lines (solid/dashed, tangent, parallel), arrows and their direction, regions and how they are numbered, colours if meaningful; relative positions (above/below/left/right, inside/outside).
+Cosa mostra: 1-3 sentences on the meaning of the figure in relation to the text.
+Rules: do not invent anything that cannot be seen; if something cannot be read write [illeggibile]; the page text is for understanding, NOT for adding elements that are not in the figure; make no guesses about the meaning of a symbol if the page text does not state it (no "probably", "perhaps", "possible error"): in that case report only the symbol; no preamble, start directly with "Tipo:".{extra}"""
 
 PROMPT_REVISIONE = """
 
-Una prima descrizione di questa figura era:
+A first description of this figure was:
 <<<
 {descr}
 >>>
-Un controllore indipendente ha segnalato questi problemi:
+An independent checker reported these problems:
 {problemi}
-Riscrivi la descrizione COMPLETA con le stesse voci, correggendo i problemi SOLO se guardando l'immagine risultano veri."""
+Rewrite the COMPLETE description with the same fields, correcting the problems ONLY if they turn out to be true when you look at the image."""
 
-PROMPT_VERIFICA = """Guarda attentamente l'immagine. Per ognuna delle affermazioni numerate qui sotto rispondi:
-V = vera: si vede chiaramente nell'immagine
-F = falsa: l'immagine mostra qualcosa di diverso, oppure quell'elemento non c'e'
-N = non si puo' verificare guardando l'immagine (e' un'interpretazione)
-Sii severo e preciso: rispondi V solo se lo vedi davvero. Attenzione: alcune affermazioni sono false di proposito.
-AFFERMAZIONI:
+PROMPT_VERIFICA = """Look carefully at the image. For each of the numbered statements below answer:
+V = true: clearly visible in the image
+F = false: the image shows something different, or that element is not there
+N = cannot be verified by looking at the image (it is an interpretation)
+Be strict and precise: answer V only if you really see it. Beware: some statements are false on purpose.
+STATEMENTS:
 {elenco}
-Rispondi SOLO con un oggetto JSON, per esempio:
-{{"risposte": {{"1": "V", "2": "F", "3": "N"}}, "correzioni": {{"2": "cosa si vede davvero"}}, "mancanti": ["scritte o simboli visibili nell'immagine che non compaiono in nessuna affermazione"]}}"""
+Answer ONLY with a JSON object, for example:
+{{"risposte": {{"1": "V", "2": "F", "3": "N"}}, "correzioni": {{"2": "what is really visible"}}, "mancanti": ["writing or symbols visible in the image that appear in no statement"]}}"""
 
-# affermazioni FALSE di controllo: se il controllore dice che sono vere, la
-# sua verifica su quella figura non vale (dice "si" a tutto)
+# FALSE control statements: if the checker says they are true, its
+# check on that figure does not count (it says "yes" to everything)
 _TRAPPOLE = [
     "Nella figura e' disegnato un orologio con le lancette.",
     "In alto a destra c'e' la bandiera di uno Stato.",
@@ -1868,7 +1868,7 @@ def _gloss() -> str:
 
 
 def _pulisci(t: str) -> str:
-    """Toglie ragionamento <think>, token 'box' di GLM e recinti ```."""
+    """Removes <think> reasoning, GLM 'box' tokens and ``` fences."""
     t = re.sub(r"<think>.*?</think>", "", t or "", flags=re.S)
     t = re.sub(r"^.*?</think>", "", t, flags=re.S) if "</think>" in t else t
     t = t.replace("<|begin_of_box|>", "").replace("<|end_of_box|>", "")
@@ -1894,7 +1894,7 @@ def _json_morbido(t: str) -> dict | None:
 
 
 class ServerPigro:
-    """Avvia il server del modello solo se c'e' davvero lavoro da fare."""
+    """Starts the model server only if there is really work to do."""
 
     def __init__(self, key, threads=None, gpu=False):
         self.key, self.threads, self.gpu, self.srv = key, threads, gpu, None
@@ -1920,13 +1920,13 @@ def _contesto(md: str, name: str, prima: int = 1500, dopo: int = 600) -> str:
     return re.sub(r"[ \t]+", " ", s).strip()
 
 
-# ---- figure -----------------------------------------------------------------
+# ---- figures ----------------------------------------------------------------
 _FIG_CH_RE = re.compile(r"!\[Figura pag\. (\d+)\]\(([^)]*?/)?(p\d{4}_fig\d+\.png)\)")
 
 
 def raccogli_figure(results: dict, page_figs: dict, page_image, fig_dir: Path,
                     ctrl_dir: Path) -> list[dict]:
-    """Un 'lavoro' per figura (o per gruppo, se la pagina ne ha troppe)."""
+    """One 'job' per figure (or per group, if the page has too many)."""
     from PIL import Image
     jobs = []
     ctrl_dir.mkdir(parents=True, exist_ok=True)
@@ -1966,7 +1966,7 @@ def raccogli_figure(results: dict, page_figs: dict, page_image, fig_dir: Path,
                 else:
                     im = Image.open(fig_dir / gr[0]).convert("RGB")
             except Exception as e:
-                _log(f"    [figura {key}] ritaglio non riuscito: {e}")
+                _log(f"    [figure {key}] crop failed: {e}")
                 continue
             crop_name = Path(key).stem + ".png"
             try:
@@ -1979,11 +1979,11 @@ def raccogli_figure(results: dict, page_figs: dict, page_image, fig_dir: Path,
 
 
 def _prompt_figura(job) -> str:
-    extra = ("\nLa figura contiene piu' pannelli: descrivili uno per uno, con la loro lettera "
-             "o sigla." if job["pannelli"] else "")
+    extra = ("\nThe figure contains several panels: describe them one by one, with their letter "
+             "or label." if job["pannelli"] else "")
     if GLOSSARIO:
-        extra += f"\nSimboli usati in questo documento: {GLOSSARIO}."
-    return PROMPT_FIGURA.format(contesto=job["contesto"][:2200] or "(nessun testo)", extra=extra)
+        extra += f"\nSymbols used in this document: {GLOSSARIO}."
+    return PROMPT_FIGURA.format(contesto=job["contesto"][:2200] or "(no text)", extra=extra)
 
 
 def _taglia_descr(t: str) -> str:
@@ -2003,7 +2003,7 @@ def qwen_descrivi(srv_q: ServerPigro, jobs: list[dict], cache_dir: Path, revisio
             j["rev" if revisione else "descr"] = compatta_md(cf.read_text(encoding="utf-8"))
     if not todo:
         return
-    _log(f"  [Qwen] {'riscrivo' if revisione else 'descrivo'} {len(todo)} figure ...")
+    _log(f"  [Qwen] {'rewriting' if revisione else 'describing'} {len(todo)} figures ...")
     t_all = time.time()
     for i, j in enumerate(todo, 1):
         prompt = _prompt_figura(j)
@@ -2012,9 +2012,9 @@ def qwen_descrivi(srv_q: ServerPigro, jobs: list[dict], cache_dir: Path, revisio
         img = scale_to_fit(j["img"], MODELS["qwen"]["max_pixels"], min_pixels=300_000)
         try:
             raw, usage = srv_q().ocr(img, prompt=prompt, max_tokens=MODELS["qwen"]["max_tokens"],
-                                     label=f"[Qwen figura p.{j['page']}]")
+                                     label=f"[Qwen figure p.{j['page']}]")
         except Exception as e:
-            _log(f"    [Qwen figura {j['key']}] errore: {e}")
+            _log(f"    [Qwen figure {j['key']}] error: {e}")
             continue
         d = _taglia_descr(raw)
         if usage.get("stopped") == "loop":
@@ -2023,7 +2023,7 @@ def qwen_descrivi(srv_q: ServerPigro, jobs: list[dict], cache_dir: Path, revisio
         (cdir / (j["key"] + ".md")).write_text(d, encoding="utf-8")
         j["rev" if revisione else "descr"] = compatta_md(d)
         media = (time.time() - t_all) / i
-        _log(f"  [Qwen figure] {i}/{len(todo)} | stima residua {media*(len(todo)-i)/60:.0f} min")
+        _log(f"  [Qwen figures] {i}/{len(todo)} | time left {media*(len(todo)-i)/60:.0f} min")
 
 
 _SCAMBI = [("sinistra", "destra"), ("sopra", "sotto"), ("alto", "basso"),
@@ -2032,8 +2032,8 @@ _SCAMBI = [("sinistra", "destra"), ("sopra", "sotto"), ("alto", "basso"),
 
 
 def _altera(fr: str, seme: int) -> str | None:
-    """Versione SBAGLIATA ma plausibile di un'affermazione."""
-    # 1) un numero cambiato (es. 100 -> 300, 1 -> 3)
+    """A WRONG but plausible version of a statement."""
+    # 1) a changed number (e.g. 100 -> 300, 1 -> 3)
     nums = list(re.finditer(r"(?<![A-Za-z_\\])\d+(?:[.,]\d+)?", fr))
     if nums:
         m = nums[seme % len(nums)]
@@ -2046,14 +2046,14 @@ def _altera(fr: str, seme: int) -> str | None:
             nt = None
         if nt and nt != t:
             return fr[:m.start()] + nt + fr[m.end():]
-    # 2) una direzione / un colore scambiati
+    # 2) a swapped direction / colour
     low = fr.lower()
     for a_, b_ in _SCAMBI:
         for x, y in ((a_, b_), (b_, a_)):
             i = low.find(x)
             if i >= 0:
                 return fr[:i] + y + fr[i + len(x):]
-    # 3) un pedice cambiato ($V_{p1}$ -> $V_{p3}$)
+    # 3) a changed subscript ($V_{p1}$ -> $V_{p3}$)
     m = re.search(r"_\{?([0-9])\}?", fr)
     if m:
         d = str((int(m.group(1)) + 2) % 10)
@@ -2074,8 +2074,8 @@ def trappole_sottili(aff: list[str], seme: int, n: int = 2) -> list[str]:
 
 
 def affermazioni(descr: str, max_n: int = 24) -> list[str]:
-    """Spezza la descrizione in affermazioni verificabili una per una
-       (etichette, descrizione e 'cosa mostra', ognuna con il suo spazio)."""
+    """Splits the description into statements that can be checked one by one
+       (labels, description and 'what it shows', each with its own space)."""
     sezioni = {"Tipo": [], "Etichette": [], "Descrizione": [], "Cosa mostra": []}
     sez = "Descrizione"
     for riga in (descr or "").splitlines():
@@ -2100,10 +2100,10 @@ def affermazioni(descr: str, max_n: int = 24) -> list[str]:
 
 
 def glm_verifica_figure(srv_g: ServerPigro, jobs: list[dict], cache_dir: Path, giro: int = 1):
-    """Il controllore NON giudica la descrizione 'in blocco' (dice si' a tutto):
-       risponde vero/falso a ogni singola affermazione, mescolate a due
-       affermazioni false di prova. Se conferma una trappola, la sua verifica
-       su quella figura viene considerata non affidabile."""
+    """The checker does NOT judge the description 'as a block' (it says yes to everything):
+       it answers true/false to each single statement, mixed with two
+       false test statements. If it confirms a trap, its check
+       on that figure is considered unreliable."""
     import hashlib
     cdir = cache_dir / ("glm_fig_v3" if giro == 1 else "glm_fig2_v3")
     cdir.mkdir(parents=True, exist_ok=True)
@@ -2122,16 +2122,16 @@ def glm_verifica_figure(srv_g: ServerPigro, jobs: list[dict], cache_dir: Path, g
         todo.append(j)
     if not todo:
         return
-    _log(f"  [GLM] controllo {len(todo)} descrizioni di figure (affermazione per affermazione) ...")
+    _log(f"  [GLM] checking {len(todo)} figure descriptions (statement by statement) ...")
     t_all = time.time()
     for i, j in enumerate(todo, 1):
         aff = affermazioni(j[campo])
         if not aff:
             continue
         h = int(hashlib.md5(j["key"].encode("utf-8")).hexdigest(), 16)
-        # 1 trappola "grossolana" + fino a 2 trappole "sottili": copie di
-        # affermazioni vere con un numero, un simbolo o una direzione cambiati.
-        # Chi dice "vero" anche a quelle non sta guardando davvero i dettagli.
+        # 1 "gross" trap + up to 2 "subtle" traps: copies of
+        # true statements with a number, a symbol or a direction changed.
+        # Whoever says "true" to those too is not really looking at the details.
         tr = [_TRAPPOLE[h % len(_TRAPPOLE)]] + trappole_sottili(aff, h)
         lista = list(aff)
         for n_t, t in enumerate(tr):
@@ -2142,9 +2142,9 @@ def glm_verifica_figure(srv_g: ServerPigro, jobs: list[dict], cache_dir: Path, g
         try:
             raw, usage = srv_g().ocr(img, prompt=PROMPT_VERIFICA.format(elenco=elenco),
                                      max_tokens=MODELS["glm"]["max_tokens"], temperature=0.0,
-                                     label=f"[GLM figura p.{j['page']}]")
+                                     label=f"[GLM figure p.{j['page']}]")
         except Exception as e:
-            _log(f"    [GLM figura {j['key']}] errore: {e}")
+            _log(f"    [GLM figure {j['key']}] error: {e}")
             continue
         d = _json_morbido(raw) or {}
         risp = {str(k).strip(): str(v).strip().upper()[:1]
@@ -2175,18 +2175,18 @@ def glm_verifica_figure(srv_g: ServerPigro, jobs: list[dict], cache_dir: Path, g
                                                  encoding="utf-8")
         j[f"verifica{giro}"] = v
         media = (time.time() - t_all) / i
-        _log(f"  [GLM figure] {i}/{len(todo)}: {v['esito']} ({len(v['errori'])} errori, "
-             f"{len(v['mancanti'])} mancanti) | stima residua {media*(len(todo)-i)/60:.0f} min")
+        _log(f"  [GLM figures] {i}/{len(todo)}: {v['esito']} ({len(v['errori'])} errors, "
+             f"{len(v['mancanti'])} missing) | time left {media*(len(todo)-i)/60:.0f} min")
 
 
 def _problemi(v: dict) -> str:
-    righe = [f"- falso secondo il controllore: {e}" for e in v.get("errori", [])]
-    righe += [f"- visibile ma non citato: {m}" for m in v.get("mancanti", [])]
+    righe = [f"- false according to the checker: {e}" for e in v.get("errori", [])]
+    righe += [f"- visible but not mentioned: {m}" for m in v.get("mancanti", [])]
     return "\n".join(righe[:15])
 
 
 def esito_figura(j: dict) -> tuple[str, str, str]:
-    """(descrizione finale, stato, note del controllore)."""
+    """(final description, status, checker notes)."""
     if j.get("corretta"):
         return j["corretta"], "corretta", ""
     v1 = j.get("verifica1")
@@ -2197,8 +2197,8 @@ def esito_figura(j: dict) -> tuple[str, str, str]:
     if v1.get("esito") == "ok":
         return j["descr"], "confermata", ""
     if v1.get("esito") == "non affidabile":
-        return j["descr"], "non verificata", ("il controllore ha confermato anche affermazioni "
-                                              "false di prova: la sua verifica qui non vale")
+        return j["descr"], "non verificata", ("the checker also confirmed false test "
+                                              "statements: its check does not count here")
     if v1.get("esito") == "non verificata":
         return j["descr"], "non verificata", v1.get("grezzo", "")
     if not j.get("rev"):
@@ -2211,11 +2211,11 @@ def esito_figura(j: dict) -> tuple[str, str, str]:
     return j["rev"], "contestata", _problemi(v2 or v1)
 
 
-# ---- blocchi delle pagine scritte a mano ------------------------------------
+# ---- blocks of handwritten pages -------------------------------------------
 def prepara_blocchi_mano(results: dict, cache_dir: Path, page_image, fig_dir: Path,
                          fig_prefix: str, form_dir: Path) -> list[dict]:
-    """Ricostruisce le pagine di Chandra dal testo grezzo in cache mettendo un
-       segnaposto al posto di ogni blocco con formule, e ne salva il ritaglio."""
+    """Rebuilds Chandra's pages from the cached raw text, putting a
+       placeholder in place of each block with formulas, and saves its crop."""
     tutti = []
     for p in sorted(results):
         motore, md = results[p]
@@ -2230,7 +2230,7 @@ def prepara_blocchi_mano(results: dict, cache_dir: Path, page_image, fig_dir: Pa
             bl = []
             md2 = chandra_html_to_md(html, img, p, fig_dir, fig_prefix, blocchi=bl)
         except Exception as e:
-            _log(f"    [p.{p}] blocchi non ricostruiti: {e}")
+            _log(f"    [p.{p}] blocks not rebuilt: {e}")
             continue
         md2 = normalize_math(trim_repeats(md2)).strip()
         if not bl or not md2:
@@ -2283,7 +2283,7 @@ def _diff_blocchi(a: str, b: str, max_n: int = 3) -> str:
         if len(out) >= max_n:
             out.append("...")
             break
-    return "; ".join(out) or "differenze nel testo"
+    return "; ".join(out) or "differences in the text"
 
 
 def scegli_blocco(b: dict) -> tuple[str, str, str]:
@@ -2296,9 +2296,9 @@ def scegli_blocco(b: dict) -> tuple[str, str, str]:
         return c, "confermata", ""
     if g:
         if blocchi_concordi(g, c):
-            return c, "arbitrata", "Qwen diverso: " + _diff_blocchi(c, q)
+            return c, "arbitrata", "Qwen differs: " + _diff_blocchi(c, q)
         if blocchi_concordi(g, q):
-            return q, "arbitrata", "Chandra diverso: " + _diff_blocchi(q, c)
+            return q, "arbitrata", "Chandra differs: " + _diff_blocchi(q, c)
         cands = {"chandra": c, "qwen": q, "glm": g}
         best = min(cands, key=lambda k: (sum(_blocco_dist(cands[k], cands[o])
                                              for o in cands if o != k), k != "chandra"))
@@ -2333,19 +2333,19 @@ def rileggi_blocchi(srv: ServerPigro, chi: str, blocchi: list[dict], form_dir: P
     if not todo:
         return
     nome = MODELS[chi]["nome"]
-    _log(f"  [{nome}] rilegge {len(todo)} blocchi scritti a mano ...")
+    _log(f"  [{nome}] rilegge {len(todo)} handwritten blocks ...")
     t_all = time.time()
     for i, b in enumerate(todo, 1):
         try:
             im = Image.open(form_dir / b["crop"]).convert("RGB")
             t = _trascrivi(srv, im, f"[{chi} blocco {b['id']}]")
         except Exception as e:
-            _log(f"    [{chi} blocco {b['id']}] errore: {e}")
+            _log(f"    [{chi} blocco {b['id']}] error: {e}")
             continue
         (cdir / (b["id"] + ".md")).write_text(t, encoding="utf-8")
         b[chi] = compatta_md(t)
         media = (time.time() - t_all) / i
-        _log(f"  [{chi} blocchi] {i}/{len(todo)} | stima residua {media*(len(todo)-i)/60:.0f} min")
+        _log(f"  [{chi} blocchi] {i}/{len(todo)} | time left {media*(len(todo)-i)/60:.0f} min")
 
 
 def glm_arbitra_formule(srv: ServerPigro, formule: list[dict], form_dir: Path, cache_dir: Path):
@@ -2361,7 +2361,7 @@ def glm_arbitra_formule(srv: ServerPigro, formule: list[dict], form_dir: Path, c
             todo.append(f)
     if not todo:
         return
-    _log(f"  [GLM] arbitra {len(todo)} formule dubbie ...")
+    _log(f"  [GLM] refereeing {len(todo)} doubtful formulas ...")
     for i, f in enumerate(todo, 1):
         try:
             im = scale_to_fit(Image.open(form_dir / f["crop"]).convert("RGB"), 1_000_000,
@@ -2369,12 +2369,12 @@ def glm_arbitra_formule(srv: ServerPigro, formule: list[dict], form_dir: Path, c
             raw, usage = srv().ocr(im, prompt=PROMPT_FORMULA, max_tokens=1500, temperature=0.0,
                                    label=f"[GLM formula {f['id']}]")
         except Exception as e:
-            _log(f"    [GLM formula {f['id']}] errore: {e}")
+            _log(f"    [GLM formula {f['id']}] error: {e}")
             continue
         t = "" if usage.get("stopped") == "loop" else tex_core(_pulisci(raw))
         (cdir / (f["id"] + ".txt")).write_text(t, encoding="utf-8")
         f["glm"] = compatta_tex(t)
-        _log(f"  [GLM formule] {i}/{len(todo)}")
+        _log(f"  [GLM formulas] {i}/{len(todo)}")
 
 
 _CORR_TXT_RE = re.compile(r"^###\s+(?:FIG\s+)?(\S+)\s(?:(?!\n###).)*?\nCORREZIONE[^\n]*\n```[a-z]*\n(.*?)\n```",
@@ -2382,13 +2382,13 @@ _CORR_TXT_RE = re.compile(r"^###\s+(?:FIG\s+)?(\S+)\s(?:(?!\n###).)*?\nCORREZION
 
 
 def leggi_correzioni_testo(report: Path, cache_dir: Path, auto: dict) -> dict:
-    """Correzioni di blocchi a mano e descrizioni di figure (blocchi ```)."""
+    """Corrections of handwritten blocks and figure descriptions (``` blocks)."""
     return _leggi_corr(report, cache_dir, auto, _CORR_TXT_RE, "correzioni_testo_v2.json",
                        lambda a, b: re.sub(r"\s+", " ", a.strip()) == re.sub(r"\s+", " ", b.strip()))
 
 
 def _sostituisci_fig_chandra(md: str, nuove: dict) -> str:
-    """Pagine di Chandra: rimpiazza il blocco descrizione dopo l'immagine."""
+    """Chandra's pages: replaces the description block after the image."""
     def r(m):
         name = m.group(3)
         if name not in nuove:
@@ -2400,12 +2400,12 @@ def _sostituisci_fig_chandra(md: str, nuove: dict) -> str:
 
 
 def ripara_dollari(md: str) -> str:
-    r"""Ripara i $ spaiati (un $ di troppo trascina tutto il testo seguente
-       dentro una formula):
-       - note a pie' di pagina lette come '$ ^{11} $Testo' -> '[^11]: Testo'
-       - '$a$$\to$$b$' su una riga (formule in riga attaccate) -> '$a$ $\to$ $b$'
-       - se in un paragrafo resta un $ senza compagno, viene 'neutralizzato'
-         (\$) cosi' non rovina il resto della pagina."""
+    r"""Repairs unmatched $ (one $ too many pulls all the following text
+       into a formula):
+       - footnotes read as '$ ^{11} $Text' -> '[^11]: Text'
+       - '$a$$\to$$b$' on one line (joined inline formulas) -> '$a$ $\to$ $b$'
+       - if an unmatched $ stays in a paragraph, it is 'neutralized'
+         (\$) so it does not ruin the rest of the page."""
     out_lines = []
     for ln in md.split("\n"):
         ln = re.sub(r"^(\s*)\$?\s*\^\{(\d{1,3})\}\s*\$\s*(?=\S)", r"\1[^\2]: ", ln)
@@ -2413,11 +2413,11 @@ def ripara_dollari(md: str) -> str:
         st = ln.strip()
         if "$$" in st and st != "$$" and not st.startswith(">"):
             singoli = re.sub(r"\$\$", "", st).count("$")
-            if singoli:                       # $$ in mezzo a formule in riga
+            if singoli:                       # $$ in the middle of inline formulas
                 ln = ln.replace("$$", "$ $")
         out_lines.append(ln)
     md = "\n".join(out_lines)
-    # paragrafo per paragrafo (i blocchi $$...$$ e il `codice` non contano)
+    # paragraph by paragraph (the $$...$$ blocks and `code` do not count)
     pezzi = re.split(r"(\n\s*\n)", md)
     for i, par in enumerate(pezzi):
         if "$" not in par:
@@ -2426,13 +2426,13 @@ def ripara_dollari(md: str) -> str:
         pos = [k for k, c in enumerate(mask) if c == "$" and (k == 0 or mask[k - 1] != "\\")]
         if len(pos) % 2 == 0:
             continue
-        # il $ spaiato: l'ultimo, oppure quello seguito da piu' testo "normale"
+        # the unmatched $: the last one, or the one followed by more "normal" text
         k = pos[-1]
         par = par[:k] + "\\$" + par[k + 1:]
         pezzi[i] = par
     md = "".join(pezzi)
 
-    # dentro le formule: entita' HTML (&lt; &gt; &amp;) e '·' che KaTeX non accetta
+    # inside formulas: HTML entities (&lt; &gt; &amp;) and '·' which KaTeX does not accept
     def _m(m):
         t = m.group(0)
         t = t.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&").replace("·", "\\cdot ")
@@ -2442,29 +2442,29 @@ def ripara_dollari(md: str) -> str:
 
 
 def guida_per_ia() -> str:
-    """Istruzioni in testa al file per l'IA che lo leggera'."""
-    gloss = f"\n> - Simboli usati nel documento: {GLOSSARIO}." if GLOSSARIO else ""
-    return ("\n> **Guida per l'IA che legge questo file.** Testo convertito automaticamente "
-            "da scansioni con modelli locali. Affidabilita':\n"
-            "> - Pagine stampate (motore *paddle*): testo e formule ALTA affidabilita'; le "
-            "formule a blocco sono state lette da piu' modelli e messe ai voti.\n"
-            "> - Pagine scritte a mano (motore *chandra*, segnate con ⚠): BASSA affidabilita'.\n"
-            "> - Descrizioni delle figure: scritte da un modello; la struttura e' di solito "
-            "giusta, i dettagli (etichette scritte a mano, valori, versi) possono essere "
+    """Instructions at the top of the file for the AI that will read it."""
+    gloss = f"\n> - Symbols used in the document: {GLOSSARIO}." if GLOSSARIO else ""
+    return ("\n> **Guide for the AI reading this file.** Text converted automatically "
+            "from scans with local models. Reliability:\n"
+            "> - Printed pages (*paddle* engine): text and formulas HIGH reliability; the "
+            "display formulas were read by several models and put to a vote.\n"
+            "> - Handwritten pages (*chandra* engine, marked with ⚠): LOW reliability.\n"
+            "> - Figure descriptions: written by a model; the structure is usually "
+            "right, the details (handwritten labels, values, directions) may be "
             "sbagliati.\n"
-            "> - ⚠ **Formula incerta** / **Lettura incerta**: i modelli non concordano; sono "
-            "riportate le letture alternative.\n"
-            "> Quando un punto segnato e' in contrasto con il resto del testo, con altre "
-            "formule o con la fisica, considera giusta la versione coerente e dillo. Confusioni "
-            "tipiche della lettura automatica della scrittura a mano: p↔k, a↔α↔ω↔ϱ, δ↔S, "
-            "ℓ↔c↔e, M↔μ, ρ↔p, u↔μ, 1↔7, 0↔6, pistone↔protone." + gloss + "\n"
-            "> Le immagini delle pagine originali sono indicate nei commenti "
+            "> - ⚠ **Uncertain formula** / **Uncertain reading**: the models do not agree; the "
+            "alternative readings are given.\n"
+            "> When a marked point conflicts with the rest of the text, with other "
+            "formulas or with physics, take the consistent version as right and say so. Typical "
+            "confusions in automatic reading of handwriting: p↔k, a↔α↔ω↔ϱ, δ↔S, "
+            "ℓ↔c↔e, M↔μ, ρ↔p, u↔μ, 1↔7, 0↔6, piston↔proton." + gloss + "\n"
+            "> The images of the original pages are given in the comments "
             "`<!-- immagine pagina: ... -->`.\n\n")
 
 
 def _tieni_sveglio(si: bool):
-    """Windows: impedisce la sospensione automatica mentre si lavora
-       (non vale per la chiusura del coperchio)."""
+    """Windows: prevents automatic sleep during work
+       (does not apply to closing the lid)."""
     if not IS_WIN:
         return
     try:
@@ -2478,8 +2478,8 @@ def _tieni_sveglio(si: bool):
 
 def convert_file(src: Path, mode: str, args=None,
                  out_assets: Path | None = None) -> tuple[str, Path]:
-    """mode: 'paddle' | 'chandra' | 'ibrido'. Ritorna (markdown, cartella_media).
-       Durante la conversione il PC non va in sospensione da solo."""
+    """mode: 'paddle' | 'chandra' | 'ibrido'. Returns (markdown, media_folder).
+       During the conversion the PC does not go to sleep by itself."""
     _log(f"  ocr_vlm versione {VERSIONE}")
     _tieni_sveglio(True)
     try:
@@ -2490,7 +2490,7 @@ def convert_file(src: Path, mode: str, args=None,
 
 def _convert_file(src: Path, mode: str, args=None,
                   out_assets: Path | None = None) -> tuple[str, Path]:
-    """mode: 'paddle' | 'chandra' | 'ibrido'. Ritorna (markdown, cartella_media)."""
+    """mode: 'paddle' | 'chandra' | 'ibrido'. Returns (markdown, media_folder)."""
     import fitz
     from PIL import Image
 
@@ -2524,7 +2524,7 @@ def _convert_file(src: Path, mode: str, args=None,
             return render_page(doc, p - 1, dpi)
         return Image.open(src).convert("RGB")
 
-    # chi fa cosa
+    # who does what
     if mode == "paddle":
         plan = {"paddle": list(pages), "chandra": []}
     elif mode == "chandra":
@@ -2533,7 +2533,7 @@ def _convert_file(src: Path, mode: str, args=None,
         plan = {"paddle": [p for p in pages if p not in hq],
                 "chandra": [p for p in pages if p in hq]}
 
-    results: dict[int, tuple[str, str]] = {}   # pagina -> (motore, md)
+    results: dict[int, tuple[str, str]] = {}   # page -> (engine, md)
     stats = {"paddle": [], "chandra": []}
     tok_hist = {"paddle": [], "chandra": []}
     page_figs: dict[int, list[str]] = {}
@@ -2550,15 +2550,15 @@ def _convert_file(src: Path, mode: str, args=None,
 
     def run_engine(key: str, plist: list[int]):
         nonlocal done_jobs
-        # cache separata per la modalita' Paddle "completa" (layout)
+        # separate cache for "full" Paddle mode (layout)
         ckey = "paddle_layout" if (key == "paddle" and plist
                                    and paddle_layout_disponibile()) else key
         if key == "paddle" and plist:
             if ckey == "paddle_layout":
-                _log("  [paddle] modalita' COMPLETA (layout + blocchi)")
+                _log("  [paddle] FULL mode (layout + blocks)")
             else:
-                _log("  [paddle] modalita' SEMPLICE (pagina intera) - layout non disponibile: "
-                     f"{_LAYOUT_ERR or 'paddleocr non installato'}")
+                _log("  [paddle] SIMPLE mode (whole page) - layout not available: "
+                     f"{_LAYOUT_ERR or 'paddleocr not installed'}")
         todo = []
         retry_with_chandra = []
         vecchie = 0
@@ -2571,7 +2571,7 @@ def _convert_file(src: Path, mode: str, args=None,
                     mj = {}
                 if ckey == "paddle_layout" and mj.get("v", 1) < LAYOUT_CACHE_V \
                         and not mj.get("vuota"):
-                    vecchie += 1           # fatta con la versione precedente: si rifa'
+                    vecchie += 1           # done with the previous version: redo it
                     todo.append(p)
                     continue
                 results[p] = (key, cf.read_text(encoding="utf-8"))
@@ -2583,10 +2583,10 @@ def _convert_file(src: Path, mode: str, args=None,
             else:
                 todo.append(p)
         if vecchie:
-            _log(f"  [{key}] {vecchie} pagine in cache sono della versione precedente "
-                 "(senza verifica formule): le rifaccio")
+            _log(f"  [{key}] {vecchie} cached pages are from the previous version "
+                 "(no formula verification): redoing them")
         if plist and len(todo) < len(plist):
-            _log(f"  [{key}] {len(plist)-len(todo)} pagine gia' fatte (cache), ne restano {len(todo)}")
+            _log(f"  [{key}] {len(plist)-len(todo)} pages already done (cache), remaining {len(todo)}")
         if not todo:
             return retry_with_chandra
         with LlamaServer(key, threads=threads, gpu=gpu) as srv:
@@ -2594,17 +2594,17 @@ def _convert_file(src: Path, mode: str, args=None,
             if key == "paddle" and paddle_layout_disponibile():
                 try:
                     layout = PaddleLayout(srv.url)
-                    _log("  [paddle] modalita' COMPLETA: layout + riconoscimento per blocchi")
+                    _log("  [paddle] FULL mode: layout + recognition by blocks")
                 except Exception as e:
-                    _log(f"  [paddle] layout non disponibile ({type(e).__name__}: {e}); uso la pagina intera")
+                    _log(f"  [paddle] layout not available ({type(e).__name__}: {e}); using the whole page")
             elif key == "paddle":
-                _log("  [paddle] modalita' semplice (pagina intera). Per la modalita' completa: "
+                _log("  [paddle] simple mode (whole page). For full mode: "
                      "python ocr_vlm.py setup layout")
             for j, p in enumerate(todo, 1):
                 img = page_image(p, MODELS[key]["dpi"])
                 ink = ink_ratio(img)
                 if ink < 0.0003:
-                    md, meta = "*(pagina vuota)*", {"secondi": 0, "vuota": True}
+                    md, meta = "*(empty page)*", {"secondi": 0, "vuota": True}
                 else:
                     toks = [m for m in tok_hist[key] if m]
                     exp = (sum(toks) / len(toks)) if toks else None
@@ -2613,8 +2613,8 @@ def _convert_file(src: Path, mode: str, args=None,
                         t0p = time.time()
                         try:
                             md, figs, formule = layout.page_md(img, p, fig_dir, fig_prefix)
-                            # rilettura delle formule solo se la pagina restera'
-                            # a Paddle (le pagine a mano vanno comunque a Chandra)
+                            # formula reread only if the page will stay
+                            # with Paddle (handwritten pages go to Chandra anyway)
                             dubbia_pag = mode == "ibrido" and leggibilita(md)["illeggibile"]
                             if formule and VERIFICA_FORMULE != "0" and not dubbia_pag:
                                 paddle_rilettura_formule(srv, formule, img,
@@ -2625,7 +2625,7 @@ def _convert_file(src: Path, mode: str, args=None,
                                     "formule": formule, "v": LAYOUT_CACHE_V}
                             page_formule[p] = formule
                         except Exception as e:
-                            _log(f"    [paddle p.{p}] layout fallito ({type(e).__name__}: {e}); pagina intera")
+                            _log(f"    [paddle p.{p}] layout failed ({type(e).__name__}: {e}); whole page")
                             md = None
                     if md is None:
                         md, meta = _ocr_one(srv, key, img, p, fig_dir, fig_prefix,
@@ -2633,7 +2633,7 @@ def _convert_file(src: Path, mode: str, args=None,
                                             raw_file=cache_dir / ckey / f"page_{p:04d}.raw.txt")
                     if meta.get("token_out") and meta.get("fermato") is None:
                         tok_hist[key].append(meta["token_out"])
-                    # pagina "sospetta": loop, poco testo, o testo illeggibile
+                    # "suspicious" page: loop, little text, or unreadable text
                     if key == "paddle":
                         meta["leggibilita"] = leggibilita(md)
                     if key == "paddle" and mode == "ibrido" and (
@@ -2641,8 +2641,8 @@ def _convert_file(src: Path, mode: str, args=None,
                             or meta["leggibilita"]["illeggibile"]):
                         meta["sospetta"] = True
                         retry_with_chandra.append(p)
-                        _log(f"    [paddle p.{p}] testo poco affidabile "
-                             f"({meta['leggibilita']}) -> passera' a Chandra")
+                        _log(f"    [paddle p.{p}] unreliable text "
+                             f"({meta['leggibilita']}) -> will go to Chandra")
                 cf = _cache_file(cache_dir, ckey, p)
                 cf.parent.mkdir(parents=True, exist_ok=True)
                 if ckey == "paddle_layout":
@@ -2657,15 +2657,15 @@ def _convert_file(src: Path, mode: str, args=None,
                 eta = media * (len(todo) - j)
                 _log(f"  [{key}] pagina {p} ({j}/{len(todo)}): {meta.get('secondi',0):.0f} s"
                      f"{'  [LOOP]' if meta.get('loop') else ''}"
-                     f"{'  [TAGLIATA AL LIMITE]' if meta.get('fermato') == 'limite' else ''}"
-                     f"  | stima residua {eta/60:.0f} min")
+                     f"{'  [CUT AT THE LIMIT]' if meta.get('fermato') == 'limite' else ''}"
+                     f"  | time left {eta/60:.0f} min")
                 _log(f"  OCR: {int(done_jobs*100/max(1,total_jobs))}% ({done_jobs}/{total_jobs})")
         return retry_with_chandra
 
     t_start = time.time()
     retry = run_engine("paddle", plan["paddle"])
     if retry:
-        _log(f"  [ibrido] {len(retry)} pagine sospette passano a Chandra: {retry}")
+        _log(f"  [ibrido] {len(retry)} suspicious pages go to Chandra: {retry}")
         total_jobs += len(retry)
     full_chandra = sorted(set(plan["chandra"]) | set(retry))
     run_engine("chandra", full_chandra)
@@ -2677,16 +2677,16 @@ def _convert_file(src: Path, mode: str, args=None,
     except ValueError:
         ctrl_prefix = f"{media_dirname}/{stem}/controlli".replace(" ", "%20")
 
-    # 1) pagine scritte a mano: i blocchi con formule diventano segnaposto
+    # 1) handwritten pages: blocks with formulas become placeholders
     blocchi: list[dict] = []
     if ibrido and VERIFICA_MANO and any(k == "chandra" for k, _ in results.values()):
         blocchi = prepara_blocchi_mano(results, cache_dir, page_image, fig_dir, fig_prefix,
                                        form_dir)
         if blocchi:
-            _log(f"  [mano] {len(blocchi)} blocchi con formule da far rileggere")
+            _log(f"  [mano] {len(blocchi)} blocks with formulas to reread")
 
-    # 2) formule stampate: Chandra rilegge i ritagli
-    formule_finali = []          # (pagina, formula)
+    # 2) printed formulas: Chandra rereads the crops
+    formule_finali = []          # (page, formula)
     for p, fl in sorted(page_formule.items()):
         if results.get(p, ("",))[0] == "paddle":
             formule_finali += [(p, f) for f in fl]
@@ -2698,7 +2698,7 @@ def _convert_file(src: Path, mode: str, args=None,
         if dub:
             lettori_extra_formule(dub, form_dir, cache_dir)
 
-    # 3) figure da descrivere
+    # 3) figures to describe
     jobs: list[dict] = []
     if ibrido and DESCRIZIONI == "qwen":
         jobs = raccogli_figure(results, page_figs, page_image, fig_dir, ctrl_dir)
@@ -2709,7 +2709,7 @@ def _convert_file(src: Path, mode: str, args=None,
             describe_figures(todo_f, page_image, cache_dir, fig_dir, fig_desc,
                              threads=threads, gpu=gpu)
 
-    # 4) Qwen: descrizioni delle figure + seconda lettura dei blocchi a mano
+    # 4) Qwen: figure descriptions + second reading of handwritten blocks
     if jobs or blocchi:
         q = ServerPigro("qwen", threads, gpu)
         try:
@@ -2720,7 +2720,7 @@ def _convert_file(src: Path, mode: str, args=None,
         finally:
             q.close()
 
-    # 5) GLM: arbitro sui disaccordi + controllo delle descrizioni
+    # 5) GLM: referee on disagreements + check of the descriptions
     if ibrido and ARBITRO == "glm":
         gs = ServerPigro("glm", threads, gpu)
         try:
@@ -2735,7 +2735,7 @@ def _convert_file(src: Path, mode: str, args=None,
                 glm_verifica_figure(gs, jobs, cache_dir, giro=1)
         finally:
             gs.close()
-        # 6) Qwen riscrive le figure contestate, 7) GLM le ricontrolla
+        # 6) Qwen rewrites the disputed figures, 7) GLM checks them again
         contest = [j for j in jobs if (j.get("verifica1") or {}).get("esito") == "errori"]
         if contest:
             for j in contest:
@@ -2751,7 +2751,7 @@ def _convert_file(src: Path, mode: str, args=None,
             finally:
                 gs.close()
 
-    # scelte finali + correzioni scritte a mano nel file da controllare
+    # final choices + corrections written by hand in the review file
     scelte = {}
     for p, f in formule_finali:
         scelte[f["id"]] = scegli_formula(f)[0]
@@ -2776,12 +2776,12 @@ def _convert_file(src: Path, mode: str, args=None,
         if stato == "dubbia":
             alt = [b[k] for k in ("chandra", "qwen", "glm")
                    if b.get(k) and b[k].strip() != t.strip()]
-            # le letture alternative vanno in `codice`: l'IA le legge, ma non vengono
-            # interpretate come formule (un pezzo tagliato romperebbe i $...$)
+            # the alternative readings go in `code`: the AI reads them, but they are not
+            # interpreted as formulas (a cut piece would break the $...$)
             alt = " ⟂ ".join("`" + re.sub(r"\s+", " ", a_).strip()[:400].replace("`", "'") + "`"
                              for a_ in alt)
-            t += (f"\n\n> ⚠ **Lettura incerta** (blocco {b['id']}, scritto a mano): le letture "
-                  f"automatiche non concordano ({nota}). Altre letture: {alt}")
+            t += (f"\n\n> ⚠ **Uncertain reading** (block {b['id']}, handwritten): the automatic "
+                  f"readings do not agree ({nota}). Other readings: {alt}")
         blocco_md[b["id"]] = t
     voci_fig = []
     fig_pag = {}
@@ -2794,24 +2794,24 @@ def _convert_file(src: Path, mode: str, args=None,
             continue
         testo = d
         if stato == "contestata" and nota:
-            testo += ("\n\n⚠ *Descrizione automatica CONTESTATA: il secondo modello segnala questi "
-                      "punti come falsi o mancanti (verifica con il testo della pagina):*\n" + nota)
+            testo += ("\n\n⚠ *DISPUTED automatic description: the second model flags these "
+                      "points as false or missing (check against the page text):*\n" + nota)
         elif stato == "non verificata":
-            testo += ("\n\n⚠ *Descrizione automatica NON verificata (il controllore non era "
-                      "affidabile su questa figura): simboli, valori e versi potrebbero essere "
-                      "sbagliati; in caso di contrasto vale il testo della pagina.*")
+            testo += ("\n\n⚠ *UNVERIFIED automatic description (the checker was not "
+                      "reliable on this figure): symbols, values and directions may be "
+                      "wrong; in case of conflict the page text prevails.*")
         elif stato == "non controllata":
-            testo += ("\n\n*(Descrizione automatica, non controllata da un secondo modello: "
-                      "i dettagli possono contenere errori.)*")
+            testo += ("\n\n*(Automatic description, not checked by a second model: "
+                      "details may contain errors.)*")
         elif stato in ("confermata", "rivista"):
-            testo += ("\n\n*(Descrizione automatica, controllata da un secondo modello; "
-                      "i dettagli fini possono comunque contenere errori.)*")
+            testo += ("\n\n*(Automatic description, checked by a second model; "
+                      "fine details may still contain errors.)*")
         fig_desc[j["names"][0]] = testo
         fig_pag[j["names"][0]] = j["page"]
         for nm in j["names"][1:]:
-            fig_desc[nm] = "*(vedi la descrizione d'insieme della prima figura di questa pagina)*"
+            fig_desc[nm] = "*(see the overall description in the first figure on this page)*"
             fig_pag[nm] = j["page"]
-    for nome, vv in (("formule stampate", voci), ("blocchi a mano", voci_blocchi),
+    for nome, vv in (("printed formulas", voci), ("handwritten blocks", voci_blocchi),
                      ("figure", voci_fig)):
         if vv:
             cont = {}
@@ -2819,7 +2819,7 @@ def _convert_file(src: Path, mode: str, args=None,
                 cont[v["stato"]] = cont.get(v["stato"], 0) + 1
             _log(f"  [verifica {nome}] " + ", ".join(f"{k}: {n}" for k, n in sorted(cont.items())))
 
-    # immagini di pagina (backup visivo, WebP leggero)
+    # page images (visual backup, light WebP)
     page_links = {}
     if keep_page_images and doc is not None:
         pdir = assets / "_pages"
@@ -2833,28 +2833,28 @@ def _convert_file(src: Path, mode: str, args=None,
     if doc is not None:
         doc.close()
 
-    # descrizioni delle figure al posto dei segnaposto
+    # figure descriptions in place of the placeholders
     def _fill(md: str) -> str:
         def r(m):
             d = fig_desc.get(m.group(1))
             if not d:
-                return ("*(immagine ritagliata; descrizione disponibile con --engine vlm_ibrido)*"
-                        if mode != "ibrido" else "*(nessuna descrizione)*")
+                return ("*(cropped image; description available with --engine vlm_ibrido)*"
+                        if mode != "ibrido" else "*(no description)*")
             return d.strip().replace("\n", "\n> ")
         md = re.sub(r"\{\{DESCR:([^}]+)\}\}", r, md)
 
-        def rf(m):              # formule: versione verificata (o quella di Paddle)
+        def rf(m):              # formulas: verified version (or Paddle's)
             fid = m.group(1)
             if fid in formula_md:
                 return formula_md[fid]
-            return "\n\n*(formula non disponibile)*\n\n"
+            return "\n\n*(formula not available)*\n\n"
         md = re.sub(r"\{\{FORMULA:([^}]+)\}\}", rf, md)
         bmap = {b["id"]: b.get("chandra", "") for b in blocchi}
         md = re.sub(r"\{\{BLOCCO:([^}]+)\}\}",
                     lambda m: blocco_md.get(m.group(1), bmap.get(m.group(1), "")), md)
         return re.sub(r"\n{3,}", "\n\n", md)
     results = {p: (k, ripara_dollari(_fill(md))) for p, (k, md) in results.items()}
-    # pagine di Chandra: le figure prendono la descrizione verificata (Qwen/GLM)
+    # Chandra's pages: figures get the verified description (Qwen/GLM)
     nuove_ch = {nm: (f"> **[Figura — pag. {fig_pag[nm]}]** "
                      + fig_desc[nm].strip().replace("\n", "\n> "))
                 for nm in fig_desc if re.match(r"p\d{4}_fig\d+\.png$", nm) and nm in fig_pag}
@@ -2862,7 +2862,7 @@ def _convert_file(src: Path, mode: str, args=None,
         results = {p: (k, _sostituisci_fig_chandra(md, nuove_ch) if k == "chandra" else md)
                    for p, (k, md) in results.items()}
 
-    # file "da controllare": formule dubbie + parole sospette
+    # "to review" file: doubtful formulas + suspicious words
     from collections import Counter
     freq_doc = Counter(w.lower() for k, md in results.values()
                        for w in re.findall(r"[A-Za-zÀ-ÿ]{5,}", md))
@@ -2875,13 +2875,13 @@ def _convert_file(src: Path, mode: str, args=None,
             n_dub = sum(1 for v in voci if v["stato"] == "dubbia")
             n_bd = sum(1 for v in voci_blocchi if v["stato"] == "dubbia")
             n_fc = sum(1 for v in voci_fig if v["stato"] in ("contestata", "non verificata"))
-            _log(f"  Da controllare: {n_dub} formule dubbie, {n_bd} blocchi a mano dubbi, "
-                 f"{n_fc} figure contestate, "
-                 f"{sum(len(w) for w in parole.values())} parole sospette -> {report.name}")
+            _log(f"  To review: {n_dub} doubtful formulas, {n_bd} doubtful handwritten blocks, "
+                 f"{n_fc} disputed figures, "
+                 f"{sum(len(w) for w in parole.values())} suspicious words -> {report.name}")
         except Exception as e:
-            _log(f"  [avviso] non riesco a scrivere {report.name}: {e}")
+            _log(f"  [warning] cannot write {report.name}: {e}")
 
-    # assemblaggio (senza intestazioni / pie' di pagina ripetuti)
+    # assembly (without repeated headers/footers)
     if len(results) >= 2:
         cleaned = strip_running_lines({p: md for p, (k, md) in results.items()})
         results = {p: (results[p][0], cleaned[p]) for p in results}
@@ -2892,36 +2892,36 @@ def _convert_file(src: Path, mode: str, args=None,
     parts = []
     issues = 0
     for p in pages:
-        key, md = results.get(p, ("?", "*(pagina non convertita)*"))
+        key, md = results.get(p, ("?", "*(page not converted)*"))
         issues += math_issues(md)
         parts.append(f"\n\n<!-- ===== Pagina {p} di {n} | motore: {key} ===== -->\n")
         if p in page_links:
-            parts.append(f"<!-- immagine pagina: {page_links[p]} -->\n")
+            parts.append(f"<!-- page image: {page_links[p]} -->\n")
         if key == "chandra" and mode == "ibrido":
-            parts.append("\n> ⚠ **Pagina scritta a mano** — trascrizione automatica a BASSA "
-                         "affidabilita': simboli e numeri possono essere letti male (vedi la "
-                         "guida all'inizio del file). Se qualcosa non torna, ricostruiscilo dal "
-                         "contesto, dalle formule vicine e dalla fisica.\n")
+            parts.append("\n> ⚠ **Handwritten page** — automatic transcription with LOW "
+                         "reliability: symbols and numbers may be misread (see the "
+                         "guide at the top of the file). If something does not add up, rebuild it from the "
+                         "context, nearby formulas and physics.\n")
         parts.append("\n" + md + "\n")
     tot = time.time() - t_start
     sp = stats["paddle"]; sc = stats["chandra"]
     summary = (f"<!-- OCR VLM locale: {len(pages)} pagine | "
-               f"Paddle {len(sp)} pag. (media {sum(sp)/max(1,len(sp)):.0f} s) | "
-               f"Chandra {len(sc)} pag. (media {sum(sc)/max(1,len(sc)):.0f} s) | "
-               f"formule a blocco verificate: {len(voci)} (dubbie: "
+               f"Paddle {len(sp)} pages (average {sum(sp)/max(1,len(sp)):.0f} s) | "
+               f"Chandra {len(sc)} pages (average {sum(sc)/max(1,len(sc)):.0f} s) | "
+               f"verified display formulas: {len(voci)} (doubtful: "
                f"{sum(1 for v in voci if v['stato'] == 'dubbia')}) | "
-               f"blocchi a mano verificati: {len(voci_blocchi)} (dubbi: "
+               f"verified handwritten blocks: {len(voci_blocchi)} (dubbi: "
                f"{sum(1 for v in voci_blocchi if v['stato'] == 'dubbia')}) | "
-               f"figure: {len(voci_fig)} (contestate: "
+               f"figures: {len(voci_fig)} (contestate: "
                f"{sum(1 for v in voci_fig if v['stato'] == 'contestata')}) | vedi {report.name} | "
-               f"formule con sintassi sospetta: {issues} | totale {tot/60:.1f} min -->\n")
+               f"formulas with suspicious syntax: {issues} | totale {tot/60:.1f} min -->\n")
     _log("  " + summary.strip("<!-> \n"))
     guida = guida_per_ia() if mode == "ibrido" else ""
     return summary + guida + "".join(parts).strip() + "\n", assets
 
 
 def prova_modello(key: str) -> bool:
-    """Avvia il modello e gli fa leggere una piccola immagine di prova."""
+    """Starts the model and has it read a small test image."""
     from PIL import Image, ImageDraw
     im = Image.new("RGB", (640, 200), "white")
     d = ImageDraw.Draw(im)
@@ -2931,35 +2931,35 @@ def prova_modello(key: str) -> bool:
     except Exception:
         font = None
     d.text((30, 60), "PROVA 2026 ok", fill="black", font=font)
-    _log(f"Prova di {MODELS[key]['nome']} ...")
+    _log(f"Test of {MODELS[key]['nome']} ...")
     try:
         with LlamaServer(key) as srv:
             t0 = time.time()
-            raw, _ = srv.ocr(im, prompt="Che testo c'e' scritto nell'immagine? Rispondi solo con il testo.",
-                             max_tokens=300, label=f"[prova {key}]")
+            raw, _ = srv.ocr(im, prompt="What text is written in the image? Answer with the text only.",
+                             max_tokens=300, label=f"[test {key}]")
         ok = "2026" in raw
         _log(f"  risposta: {_pulisci(raw)[:80]!r} ({time.time()-t0:.0f} s) -> "
-             f"{'FUNZIONA' if ok else 'risposta strana, controlla'}")
+             f"{'WORKS' if ok else 'odd answer, check it'}")
         return ok
     except Exception as e:
-        _log(f"  [ERRORE] {MODELS[key]['nome']} non parte: {e}\n"
-             "  Probabile llama.cpp troppo vecchio per questo modello: esegui\n"
-             "      python ocr_vlm.py setup aggiorna-llamacpp\n  e riprova.")
+        _log(f"  [ERROR] {MODELS[key]['nome']} does not start: {e}\n"
+             "  Probably llama.cpp is too old for this model: run\n"
+             "      python ocr_vlm.py setup aggiorna-llamacpp\n  and try again.")
         return False
 
 
 # ----------------------------------------------------------------------------
-# CLI: setup / prova
+# CLI: setup / test
 # ----------------------------------------------------------------------------
 def _cli():
-    ap = argparse.ArgumentParser(description="OCR locale con PaddleOCR-VL e Chandra OCR 2 (llama.cpp).")
+    ap = argparse.ArgumentParser(description="Local OCR with PaddleOCR-VL and Chandra OCR 2 (llama.cpp).")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("setup", help="Scarica llama.cpp e i modelli (una tantum).")
+    s = sub.add_parser("setup", help="Downloads llama.cpp and the models (one time).")
     s.add_argument("quali", nargs="?", default="tutti",
                    choices=["tutti", "paddle", "chandra", "layout", "qwen", "glm",
                             "controllori", "aggiorna-llamacpp"])
-    s.add_argument("--gpu", action="store_true", help="Scarica anche llama.cpp Vulkan (grafica Intel).")
-    p = sub.add_parser("prova", help="Prova su alcune pagine: scrive <nome>_prova_<motore>.md")
+    s.add_argument("--gpu", action="store_true", help="Also download llama.cpp Vulkan (Intel graphics).")
+    p = sub.add_parser("prova", help="Test on some pages: writes <name>_prova_<engine>.md")
     p.add_argument("file")
     p.add_argument("--pages", default="1-3")
     p.add_argument("--engine", default="tutti", choices=["tutti", "paddle", "chandra"])
@@ -2968,21 +2968,21 @@ def _cli():
     a = ap.parse_args()
 
     if a.cmd == "setup" and a.quali == "layout":
-        _log("Installo PaddlePaddle (CPU) + PaddleOCR (pipeline completa con layout) ...")
+        _log("Installing PaddlePaddle (CPU) + PaddleOCR (full pipeline with layout) ...")
         r = subprocess.call([sys.executable, "-m", "pip", "install", "-U",
                              "--timeout", "120", "--retries", "10",
                              "paddlepaddle", "paddleocr[doc-parser]", "wordfreq"])
         if r != 0:
-            _log("Installazione non riuscita: rilancia il comando (la rete ha interrotto?)")
+            _log("Installation failed: run the command again (did the network drop?)")
             return
-        _log("Fatto. Il modello di layout si scarica da solo al primo uso.")
+        _log("Done. The layout model downloads by itself on first use.")
         return
     if a.cmd == "setup" and a.quali == "aggiorna-llamacpp":
         old = MOTORI_DIR / "llamacpp"
         if old.exists():
             bak = MOTORI_DIR / f"llamacpp_vecchio_{time.strftime('%Y%m%d_%H%M%S')}"
             old.rename(bak)
-            _log(f"Versione precedente spostata in {bak.name}")
+            _log(f"Previous version moved to {bak.name}")
         exe = ensure_llamacpp(False)
         _log(f"llama.cpp aggiornato: {exe} ({(exe.parent / 'VERSION.txt').read_text() if (exe.parent / 'VERSION.txt').exists() else '?'})")
         return
@@ -2994,7 +2994,7 @@ def _cli():
                 "controllori": ["qwen", "glm"]}.get(a.quali, [a.quali])
         for k in keys:
             ensure_model(k)
-        _log("Setup completato. Modelli in: " + str(MODELS_DIR))
+        _log("Setup completed. Models in: " + str(MODELS_DIR))
         for k in keys:
             if k in ("qwen", "glm"):
                 prova_modello(k)

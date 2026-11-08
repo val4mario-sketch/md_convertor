@@ -1,9 +1,9 @@
-"""Logging e dump dettagliato degli errori.
+"""Logging and detailed error dumps.
 
-Requisito di progetto: quando una conversione fallisce o perde dati, il sistema
-NON salva il file ma produce un log dettagliato. ``dump_failure_log`` scrive un
-file di testo in ``tomdclaude/logs/`` con tutto il contesto utile al debug:
-metadati sorgente/prodotto, elenco dei rilievi, eventuale traceback.
+Project requirement: when a conversion fails or loses data, the system
+does NOT save the file but produces a detailed log. ``dump_failure_log`` writes a
+text file in ``tomdclaude/logs/`` with all the context useful for debugging:
+source/product metadata, list of findings, any traceback.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 
 def get_logger(name: str = "tomdclaude", verbose: bool = False) -> logging.Logger:
     logger = logging.getLogger(name)
-    if logger.handlers:  # gia' configurato
+    if logger.handlers:  # already configured
         if verbose:
             logger.handlers[0].setLevel(logging.DEBUG)
         return logger
@@ -31,7 +31,7 @@ def get_logger(name: str = "tomdclaude", verbose: bool = False) -> logging.Logge
 
 def dump_failure_log(logger, result, *, traceback_text: str | None = None,
                      converter_note: str = "") -> Path:
-    """Scrive un log dettagliato del fallimento e ne ritorna il percorso."""
+    """Writes a detailed failure log and returns its path."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     path = LOG_DIR / f"FAIL_{_safe(result.src.stem)}_{ts}.log"
@@ -39,27 +39,27 @@ def dump_failure_log(logger, result, *, traceback_text: str | None = None,
     lines: list[str] = []
     add = lines.append
     add("=" * 78)
-    add(f"tomdclaude — LOG DI FALLIMENTO   {_dt.datetime.now():%Y-%m-%d %H:%M:%S}")
+    add(f"tomdclaude — FAILURE LOG   {_dt.datetime.now():%Y-%m-%d %H:%M:%S}")
     add("=" * 78)
     add(f"convertitore : {result.converter}")
     add(f"sorgente     : {result.src}")
-    add(f"destinazione : {result.dst}  (NON salvata)")
+    add(f"destinazione : {result.dst}  (NOT saved)")
     add(f"nota         : {result.note}")
     if converter_note:
-        add(f"nota motore  : {converter_note}")
+        add(f"engine note  : {converter_note}")
     add("")
-    add("--- RILIEVI DEL VALIDATOR ---")
+    add("--- VALIDATOR FINDINGS ---")
     if result.issues:
         for i in result.issues:
             add(f"  {i}")
     else:
-        add("  (nessun rilievo registrato)")
+        add("  (no findings recorded)")
     add("")
-    add("--- METADATI SORGENTE ---")
+    add("--- SOURCE METADATA ---")
     for k, v in (result.src_metadata or {}).items():
         add(f"  {k}: {_short(v)}")
     add("")
-    add("--- METADATI PRODOTTO (scartato) ---")
+    add("--- PRODUCT METADATA (discarded) ---")
     for k, v in (result.dst_metadata or {}).items():
         add(f"  {k}: {_short(v)}")
     if traceback_text:
@@ -69,7 +69,7 @@ def dump_failure_log(logger, result, *, traceback_text: str | None = None,
     add("=" * 78)
 
     path.write_text("\n".join(lines), encoding="utf-8")
-    logger.error("Log dettagliato: %s", path)
+    logger.error("Detailed log: %s", path)
     return path
 
 

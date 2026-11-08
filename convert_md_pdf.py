@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-convert_md_pdf.py — Markdown -> PDF LEGGIBILE (stile report) via `tomdclaude`.
+convert_md_pdf.py — READABLE Markdown -> PDF (report style) via `tomdclaude`.
 
-Sostituisce il vecchio percorso md->pdf "stile Word" (fallback LibreOffice) con
-un PDF tipografico: copertina, indice con numeri di pagina, capitoli numerati,
-tabelle, codice evidenziato e MATEMATICA LaTeX ($...$ / $$...$$) resa in SVG.
-Con validazione "gatekeeper": se la conversione perde dati, il file non viene
-salvato e viene prodotto un log.
+Replaces the old "Word style" md->pdf path (LibreOffice fallback) with a
+typographic PDF: cover, table of contents with page numbers, numbered chapters,
+tables, highlighted code and LaTeX MATH ($...$ / $$...$$) rendered as SVG.
+With "gatekeeper" validation: if the conversion loses data, the file is not
+saved and a log is produced.
 
-Tutto GRATIS e IN LOCALE: python-markdown + WeasyPrint + matplotlib (mathtext).
-Nessuna API, nessuna chiave, nessun upload.
+All FREE and LOCAL: python-markdown + WeasyPrint + matplotlib (mathtext).
+No API, no keys, no uploads.
 
-Interfaccia uniforme col resto dei moduli del convertitore universale:
+Interface uniform with the other modules of the universal converter:
     SUPPORTED_INPUTS, SUPPORTED_OUTPUTS, supports(), convert() -> {ok, note, elapsed}
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-# Il package `tomdclaude/` è una sottocartella di questa: assicuriamone l'import.
+# The `tomdclaude/` package is a subfolder of this one: make sure it can be imported.
 sys.path.insert(0, str(Path(__file__).parent))
 
 SUPPORTED_INPUTS = {".md", ".markdown"}
@@ -32,38 +32,38 @@ def supports(src_ext: str, dst_ext: str) -> bool:
 
 
 def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
-    """Converte un .md in PDF leggibile.
+    """Converts a .md to a readable PDF.
 
-    `opts` (tutte opzionali):
+    `opts` (all optional):
       - overwrite (bool, default True)
-      - title / author (str)         — copertina/intestazione
-      - math (bool, default True)    — rendering matematica LaTeX
-      - strict_math (bool, default False) — rifiuta il PDF se una formula non si rende
-      - strip_cite (bool, default True)   — rimuove i marcatori [cite_start]/[cite: N]
+      - title / author (str)         — cover/header
+      - math (bool, default True)    — LaTeX math rendering
+      - strict_math (bool, default False) — rejects the PDF if a formula cannot be rendered
+      - strip_cite (bool, default True)   — removes the [cite_start]/[cite: N] markers
     """
     opts = opts or {}
     t0 = time.time()
     src = Path(src); dst = Path(dst)
 
     if not src.exists():
-        return {"ok": False, "note": f"File non trovato: {src}", "elapsed": 0.0}
+        return {"ok": False, "note": f"File not found: {src}", "elapsed": 0.0}
     if dst.suffix.lower() not in SUPPORTED_OUTPUTS:
         return {"ok": False,
-                "note": f"convert_md_pdf produce solo .pdf (ricevuto {dst.suffix}).",
+                "note": f"convert_md_pdf only produces .pdf (received {dst.suffix}).",
                 "elapsed": 0.0}
 
-    # Mappa le opzioni del router su quelle di tomdclaude (default: math + pulizia ON).
+    # Map the router options to the tomdclaude ones (default: math + cleanup ON).
     tc_opts = {"overwrite": opts.get("overwrite", True)}
     for k in ("title", "author", "math", "strict_math", "strip_cite"):
         if k in opts:
             tc_opts[k] = opts[k]
 
-    # ---- RIPARAZIONE LINK IMMAGINE ROTTI ----
-    # Caso tipico: il .md e' stato spostato in una sottocartella ma media/ e'
-    # rimasta al livello superiore -> tutti i link "media/x/..." sono rotti.
-    # Cerco ogni immagine mancante in: cartella del md, cartella padre,
-    # nonna; se la trovo riscrivo il link con percorso ASSOLUTO in una copia
-    # temporanea del md (l'originale non viene toccato).
+    # ---- REPAIR OF BROKEN IMAGE LINKS ----
+    # Typical case: the .md was moved into a subfolder but media/ stayed
+    # at the upper level -> all the "media/x/..." links are broken.
+    # Look for each missing image in: the md folder, the parent folder,
+    # the grandparent; if found, rewrite the link with an ABSOLUTE path in a temporary
+    # copy of the md (the original is not touched).
     import re as _re, tempfile as _tf
     src_effettivo = src
     tmp_fixed: Path | None = None
@@ -71,27 +71,27 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
         text = src.read_text(encoding="utf-8")
         modificato = False
 
-        # (a) I blocchi <details>...</details> (page-image "garanzia diagrammi"
-        # dei .md generati da tomd2) NON vengono processati da python-markdown:
-        # resterebbero testo morto nel PDF. Per un PDF leggibile li RIMUOVIAMO
-        # (le figure di contenuto, fuori dai details, restano). Con
-        # opts['include_page_images']=True vengono invece INLINEATI.
+        # (a) The <details>...</details> blocks (page-image "diagram guarantee"
+        # of the .md files generated by tomd2) are NOT processed by python-markdown:
+        # they would stay as dead text in the PDF. For a readable PDF we REMOVE them
+        # (content figures, outside the details, remain). With
+        # opts['include_page_images']=True they are INLINED instead.
         if "<details>" in text:
             n_det = text.count("<details>")
             if opts.get("include_page_images"):
-                # tieni solo il corpo (l'immagine), togli i tag detail/summary
+                # keep only the body (the image), remove the detail/summary tags
                 text = _re.sub(r"<details><summary>[^<]*</summary>\s*", "", text)
                 text = _re.sub(r"\s*</details>", "", text)
-                print(f"  [fix] {n_det} blocchi <details> inlineati (page-image incluse)")
+                print(f"  [fix] {n_det} <details> blocks inlined (page images included)")
             else:
                 text = _re.sub(r"<details><summary>.*?</summary>.*?</details>",
                                "", text, flags=_re.S)
-                print(f"  [fix] {n_det} blocchi <details> (snapshot pagina) rimossi "
-                      f"per un PDF pulito (usa include_page_images per tenerli)")
+                print(f"  [fix] {n_det} <details> blocks (page snapshots) removed "
+                      f"for a clean PDF (use include_page_images to keep them)")
             modificato = True
 
-        # (b) Riparazione link rotti: cerca l'immagine nelle cartelle superiori
-        # e riscrivi come URI file:// (WeasyPrint non accetta 'C:/...' nudo).
+        # (b) Repair of broken links: look for the image in the upper folders
+        # and rewrite as a file:// URI (WeasyPrint does not accept a bare 'C:/...').
         links = _re.findall(r'!\[[^\]]*\]\(([^)]+)\)', text)
         broken = [l for l in links
                   if not l.startswith(("http://", "https://", "data:", "file:"))
@@ -113,44 +113,44 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
                         break
             if fixed:
                 modificato = True
-                print(f"  [fix] {fixed}/{len(set(broken))} link immagine rotti "
-                      f"riparati (media/ trovata in una cartella superiore)")
+                print(f"  [fix] {fixed}/{len(set(broken))} broken image links "
+                      f"repaired (media/ found in an upper folder)")
 
-        # (c) Marcatori grezzi "----- Start/End of picture text -----" (testo OCR
-        # dentro le immagini, prodotto da pymupdf4llm): resi come nota corsiva.
+        # (c) Raw "----- Start/End of picture text -----" markers (OCR text
+        # inside the images, produced by pymupdf4llm): rendered as an italic note.
         if "Start of picture text" in text:
             text = _re.sub(r"\*{0,2}-{3,}\s*Start of picture text\s*-{3,}\*{0,2}",
-                           "*Testo nel diagramma:*", text)
+                           "*Text in the diagram:*", text)
             text = _re.sub(r"\*{0,2}-{3,}\s*End of picture text\s*-{3,}\*{0,2}",
                            "", text)
             modificato = True
 
-        # (d) Slide-deck senza H1 (tutti '##'): numerazione '0.1' ripetuta.
-        # Promuovo i titoli di un livello: ## -> #, ### -> ## ecc.
+        # (d) Slide deck with no H1 (all '##'): repeated '0.1' numbering.
+        # Promote the headings by one level: ## -> #, ### -> ## etc.
         h1 = len(_re.findall(r"^# [^#]", text, flags=_re.M))
         h2 = len(_re.findall(r"^## ", text, flags=_re.M))
         if h1 == 0 and h2 >= 3:
             text = _re.sub(r"^(#{2,6}) ", lambda m: "#" * (len(m.group(1)) - 1) + " ",
                            text, flags=_re.M)
             modificato = True
-            print(f"  [fix] documento senza H1: {h2} titoli promossi di un livello "
-                  f"(numerazione capitoli corretta)")
+            print(f"  [fix] document with no H1: {h2} headings promoted by one level "
+                  f"(chapter numbering corrected)")
 
         if modificato:
             tmp_fixed = Path(_tf.mkdtemp(prefix="mdfix_")) / src.name
             tmp_fixed.write_text(text, encoding="utf-8")
             src_effettivo = tmp_fixed
     except Exception:
-        pass  # la riparazione e' best-effort: mai bloccare la conversione
+        pass  # the repair is best-effort: never block the conversion
 
     try:
-        # Import TARDIVO: se manca una dipendenza pesante (WeasyPrint/GTK/matplotlib),
-        # niente crash all'import del router -> errore chiaro a runtime.
+        # LATE import: if a heavy dependency is missing (WeasyPrint/GTK/matplotlib),
+        # no crash when importing the router -> clear error at run time.
         from tomdclaude.core.pipeline import convert as tc_convert
         res = tc_convert(src_effettivo, dst, tc_opts)
     except Exception as e:
         return {"ok": False,
-                "note": f"Motore tomdclaude non disponibile ({type(e).__name__}): {e}",
+                "note": f"tomdclaude engine not available ({type(e).__name__}): {e}",
                 "elapsed": time.time() - t0}
     finally:
         if tmp_fixed is not None:
@@ -158,13 +158,13 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             _sh.rmtree(tmp_fixed.parent, ignore_errors=True)
 
     elapsed = res.elapsed or (time.time() - t0)
-    note = res.note or ("ok" if res.ok else "errore")
+    note = res.note or ("ok" if res.ok else "error")
     if res.warnings:
         note += " | avvisi: " + "; ".join(i.code for i in res.warnings)
     out = {"ok": bool(res.ok), "note": note, "elapsed": elapsed}
     if not res.ok:
         if res.errors:
-            out["note"] += " | errori: " + "; ".join(i.code for i in res.errors)
+            out["note"] += " | errors: " + "; ".join(i.code for i in res.errors)
         if res.log_path:
             out["report"] = f"log: {res.log_path}"
     return out
@@ -180,8 +180,8 @@ def _self_test() -> bool:
     try:
         md = tmp / "demo.md"
         md.write_text(
-            "# Titolo\n\nTesto con math inline $E=mc^2$ e display:\n\n"
-            "$$\\int_0^1 x\\,dx = \\frac{1}{2}$$\n\n## Sezione\n\nFine.\n",
+            "# Title\n\nText with inline math $E=mc^2$ and display:\n\n"
+            "$$\\int_0^1 x\\,dx = \\frac{1}{2}$$\n\n## Section\n\nEnd.\n",
             encoding="utf-8")
         r = convert(md, tmp / "demo.pdf", {})
         ok = r["ok"] and (tmp / "demo.pdf").exists() and (tmp / "demo.pdf").stat().st_size > 1000

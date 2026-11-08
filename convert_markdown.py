@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-convert_markdown.py — Conversione AD ALTA FEDELTÀ verso Markdown.
+convert_markdown.py — HIGH-FIDELITY conversion to Markdown.
 
-Wrapper sopra `tomd2.py` (il motore esistente): riusa pymupdf4llm per i PDF,
-markitdown per Office/web, python-pptx per .pptx, openpyxl per .xlsx, OCR-scan
-auto-rilevato per PDF scansionati, marker opzionale, e tutti gli altri engine
-specializzati. NON peggiorare la qualità preesistente.
+Wrapper around `tomd2.py` (the existing engine): reuses pymupdf4llm for PDFs,
+markitdown for Office/web, python-pptx for .pptx, openpyxl for .xlsx, auto-detected
+OCR-scan for scanned PDFs, optional marker, and all the other specialized
+engines. Do NOT degrade the existing quality.
 
-Interfaccia uniforme col resto dei moduli del convertitore universale:
+Interface uniform with the other modules of the universal converter:
     convert(src, dst, opts) -> {ok, note, elapsed}
 """
 from __future__ import annotations
@@ -16,11 +16,11 @@ import sys, time
 from pathlib import Path
 from types import SimpleNamespace
 
-# Importa il motore esistente
+# Import the existing engine
 sys.path.insert(0, str(Path(__file__).parent))
 import tomd2  # noqa: E402
 
-# Estensioni: ogni cosa supportata da tomd2 va bene in input verso .md.
+# Extensions: anything supported by tomd2 is fine as input to .md.
 SUPPORTED_INPUTS = set(tomd2.ALL_SUPPORTED)  # ~170 estensioni
 SUPPORTED_OUTPUTS = {".md", ".markdown"}
 
@@ -30,20 +30,20 @@ def supports(src_ext: str, dst_ext: str) -> bool:
     d = dst_ext.lower()
     if d not in SUPPORTED_OUTPUTS:
         return False
-    # tomd2 sa già tutto: estensioni Office, PDF, codice, ecc.
-    return s in SUPPORTED_INPUTS or s == ""  # estensioni vuote (Dockerfile, ...) gestite
+    # tomd2 already knows everything: Office extensions, PDF, code, etc.
+    return s in SUPPORTED_INPUTS or s == ""  # empty extensions (Dockerfile, ...) handled
 
 
 def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
-    """Converte qualunque file supportato in Markdown ad alta fedeltà.
+    """Converts any supported file to high-fidelity Markdown.
 
-    `opts` può contenere:
+    `opts` can contain:
       - overwrite (bool, default True)
       - page_image_dpi (int, default 150)
       - page_images (bool, default True)
       - vector_threshold (int, default 3)
       - media_dir (str, default 'media')
-      - engine (str, default 'auto') — forza un engine specifico
+      - engine (str, default 'auto') — forces a specific engine
       - whisper_model (str, default 'base')
       - block_size (int, default 0)
       - force_ocr (bool, default False)
@@ -53,16 +53,16 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
 
     src = Path(src); dst = Path(dst)
     if not src.exists():
-        return {"ok": False, "note": f"File non trovato: {src}", "elapsed": 0.0}
+        return {"ok": False, "note": f"File not found: {src}", "elapsed": 0.0}
 
     dst_ext = dst.suffix.lower()
     if dst_ext not in SUPPORTED_OUTPUTS:
         return {"ok": False,
-                "note": (f"convert_markdown supporta solo output .md / .markdown "
+                "note": (f"convert_markdown only supports .md / .markdown output "
                          f"(ricevuto {dst_ext})."),
                 "elapsed": 0.0}
 
-    # Costruisco un oggetto args compatibile col CLI di tomd2
+    # Build an args object compatible with the tomd2 CLI
     args = SimpleNamespace(
         overwrite        = opts.get("overwrite", True),
         page_images      = opts.get("page_images", True),
@@ -81,20 +81,20 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
         vlm_gpu          = opts.get("vlm_gpu", False),
     )
 
-    # tomd2.convert_one scrive sempre in <src.stem>.md nella cartella del sorgente.
-    # Per supportare un dst arbitrario, faccio un trucco:
-    # 1) chiamo convert_one(src, args) -> crea <src.stem>.md
-    # 2) se dst è diverso, lo sposto/rinomino
+    # tomd2.convert_one always writes <src.stem>.md in the source folder.
+    # To support an arbitrary dst, a trick:
+    # 1) call convert_one(src, args) -> creates <src.stem>.md
+    # 2) if dst is different, move/rename it
     result = tomd2.convert_one(src, args)
     elapsed = time.time() - t0
 
     if not result["ok"]:
-        return {"ok": False, "note": result.get("note", "errore sconosciuto"),
+        return {"ok": False, "note": result.get("note", "unknown error"),
                 "elapsed": elapsed, "report": result.get("report", "")}
 
     produced_md = Path(result["out"])
     if produced_md.resolve() != dst.resolve():
-        # Sposto nel dst richiesto
+        # Move to the requested dst
         try:
             if dst.exists() and args.overwrite:
                 dst.unlink()
@@ -102,11 +102,11 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             produced_md.replace(dst)
         except Exception as e:
             return {"ok": False,
-                    "note": f"Conversione OK ma errore nello spostamento in {dst}: {e}",
+                    "note": f"Conversion OK but error moving to {dst}: {e}",
                     "elapsed": elapsed}
 
     return {"ok": True,
-            "note": result.get("report", "conversione completata"),
+            "note": result.get("report", "conversion completed"),
             "elapsed": elapsed,
             "engine": result.get("engine", "auto")}
 
@@ -115,7 +115,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
 # Self-test
 # ----------------------------------------------------------------------------
 def _self_test():
-    """Crea un piccolo .py + un .csv e li converte in .md. Pulisce al termine."""
+    """Creates a small .py and a .csv and converts them to .md. Cleans up at the end."""
     import shutil
     tmp = Path(__file__).parent / "_test_markdown"
     tmp.mkdir(exist_ok=True)

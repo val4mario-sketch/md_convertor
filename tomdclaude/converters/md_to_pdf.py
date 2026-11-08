@@ -1,22 +1,22 @@
 """MarkdownToPdfConverter — Markdown -> HTML (python-markdown) -> PDF (WeasyPrint).
 
-Obiettivo: NON una stampa grezza del codice Markdown, ma un documento formattato
-in stile report/articolo: copertina, indice automatico con numeri di pagina,
-numerazione dei capitoli, tipografia leggibile, tabelle pulite, syntax
-highlighting del codice e **matematica LaTeX renderizzata** (via SVG).
+Goal: NOT a raw printout of the Markdown code, but a formatted document
+in report/article style: cover, automatic table of contents with page numbers,
+chapter numbering, readable typography, clean tables, syntax
+highlighting of code and **rendered LaTeX math** (via SVG).
 
-Pipeline interna:
-    testo .md
+Internal pipeline:
+    .md text
       -> markdown.Markdown(extensions=[extra, toc, codehilite, arithmatex, ...])
-      -> body HTML (le formule sono marcate da arithmatex)
-      -> sostituzione delle formule con SVG (MathRenderer)
-      -> documento HTML completo: copertina + indice + contenuto
+      -> HTML body (formulas are marked by arithmatex)
+      -> replacement of the formulas with SVGs (MathRenderer)
+      -> complete HTML document: cover + contents + content
       -> WeasyPrint  -> PDF
 
-Metadati esposti al gatekeeper:
-    sorgente: headings, n_tables, text_len
-    prodotto: html_headings, n_html_tables, pages, pdf_text, pdf_text_len,
-              n_math / n_math_failed / math_failures
+Metadata exposed to the gatekeeper:
+    source: headings, n_tables, text_len
+    product: html_headings, n_html_tables, pages, pdf_text, pdf_text_len,
+             n_math / n_math_failed / math_failures
 """
 from __future__ import annotations
 
@@ -46,21 +46,21 @@ from .math_render import MathRenderer, MathStats
 
 _ASSETS = Path(__file__).resolve().parent.parent / "assets"
 
-# Marcatori di citazione lasciati dagli export LLM (es. NotebookLM/Gemini):
-# "[cite_start]" e "[cite: 1, 2]". Rumore senza valore: rimossi di default.
+# Citation markers left by LLM exports (e.g. NotebookLM/Gemini):
+# "[cite_start]" and "[cite: 1, 2]". Worthless noise: removed by default.
 _CITE_RE = _re.compile(r"\[cite_start\]\s*|\s*\[cite:[^\]]*\]")
 
-# Normalizzazione della matematica display: gli export LLM mettono spesso i
-# "$$...$$" indentati dentro un elenco o in mezzo a una frase, dove arithmatex
-# li gestisce male (matcha solo il "$...$" interno). Proteggiamo i blocchi di
-# codice e poi: $$ isolato su una riga -> blocco display; $$ inline -> $...$.
+# Normalizing display math: LLM exports often put the
+# "$$...$$" indented inside a list or in the middle of a sentence, where arithmatex
+# handles them badly (it matches only the inner "$...$"). We protect the code
+# blocks and then: $$ alone on a line -> display block; inline $$ -> $...$.
 _FENCE_SPLIT = _re.compile(r"(```.*?```|~~~.*?~~~|`[^`\n]*`)", _re.DOTALL)
 _DISPLAY_MATH = _re.compile(r"\$\$(.+?)\$\$", _re.DOTALL)
 
 
 def _normalize_display_math(text: str) -> str:
     parts = _FENCE_SPLIT.split(text)
-    for i in range(0, len(parts), 2):  # 0,2,4... = segmenti NON di codice
+    for i in range(0, len(parts), 2):  # 0,2,4... = NON-code segments
         parts[i] = _normalize_segment(parts[i])
     return "".join(parts)
 
@@ -80,13 +80,13 @@ def _normalize_segment(seg: str) -> str:
 
 _MD_EXTENSIONS = [
     "extra",                 # tabelle, fenced_code, footnotes, attr_list, def_list, abbr
-    "toc",                   # indice automatico (md.toc)
+    "toc",                   # automatic table of contents (md.toc)
     "codehilite",            # syntax highlighting via Pygments
     "admonition",            # riquadri note/avvisi
     "sane_lists",
-    "smarty",                # tipografia: virgolette curve, trattini
+    "smarty",                # typography: curly quotes, dashes
     "meta",                  # front-matter: title:, author:
-    "pymdownx.arithmatex",   # isola $...$ e $$...$$ senza toccare il codice
+    "pymdownx.arithmatex",   # isolates $...$ and $$...$$ without touching the code
 ]
 _MD_CONFIG = {
     "codehilite": {"guess_lang": False, "css_class": "codehilite"},
@@ -102,7 +102,7 @@ class MarkdownToPdfConverter(BaseConverter):
 
     # ------------------------------------------------------------------ metadati
     def extract_source_metadata(self, src: Path, opts: dict | None = None) -> dict:
-        # Stesso pre-processing della conversione, per un confronto coerente.
+        # Same pre-processing as the conversion, for a consistent comparison.
         text = self._preprocess(Path(src).read_text(encoding="utf-8", errors="replace"),
                                 opts or {})
         return {
@@ -113,7 +113,7 @@ class MarkdownToPdfConverter(BaseConverter):
 
     @staticmethod
     def _preprocess(text: str, opts: dict) -> str:
-        """Trasformazioni sul Markdown grezzo applicate PRIMA di tutto il resto."""
+        """Transformations on the raw Markdown applied BEFORE everything else."""
         if opts.get("strip_cite", True):
             text = _CITE_RE.sub("", text)
         if opts.get("math", True):
@@ -149,14 +149,14 @@ class MarkdownToPdfConverter(BaseConverter):
                  or src.stem)
         author = opts.get("author") or _meta_first(meta, "author") or ""
 
-        # --- rendering della matematica (puo' essere disattivato con opts['math']=False) ---
+        # --- math rendering (can be disabled with opts['math']=False) ---
         math_stats = MathStats()
         math_workdir = None
         if opts.get("math", True):
             math_workdir = Path(tempfile.mkdtemp(prefix="tomdclaude_math_"))
             body_html, math_stats = self._render_math(body_html, math_workdir)
 
-        # metadati strutturali DOPO la sostituzione delle formule
+        # structural metadata AFTER the formula replacement
         html_headings = html_heading_tree(body_html)
         n_html_tables = body_html.count("<table")
 
@@ -176,7 +176,7 @@ class MarkdownToPdfConverter(BaseConverter):
             "n_math_failed": math_stats.failed,
             "math_failures": list(math_stats.failures[:20]),
         }
-        note = f"PDF in stile report via WeasyPrint (titolo: {title!r})"
+        note = f"Report-style PDF via WeasyPrint (title: {title!r})"
         if math_stats.total:
             note += f"; matematica {math_stats.ok}/{math_stats.total}"
         return {"note": note, "metadata": md_meta}
@@ -241,12 +241,12 @@ class MarkdownToPdfConverter(BaseConverter):
             import sys
             if sys.platform == "win32":
                 raise RuntimeError(gtk_hint())
-        from weasyprint import HTML  # import tardivo: dopo ensure_gtk()
+        from weasyprint import HTML  # late import: after ensure_gtk()
 
         HTML(string=document_html, base_url=str(base_url)).write_pdf(str(dst))
 
 
-# --------------------------------------------------------------------- helper modulo
+# --------------------------------------------------------------------- module helper
 def _pygments_css() -> str:
     try:
         from pygments.formatters import HtmlFormatter

@@ -1,8 +1,8 @@
-"""Validatori = gatekeeper di integrita'.
+"""Validators = integrity gatekeeper.
 
-Un validatore confronta i metadati del sorgente con quelli del prodotto e
-ritorna una lista di ``ValidationIssue``. Se anche un solo rilievo e' di livello
-"error", la pipeline rifiuta la conversione e non salva il file.
+A validator compares the source metadata with that of the product and
+returns a list of ``ValidationIssue``. If even one finding is of level
+"error", the pipeline rejects the conversion and does not save the file.
 """
 from .base import Validator
 from .math_validator import MathRenderValidator
