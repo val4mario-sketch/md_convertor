@@ -1,0 +1,135 @@
+OCR WITH LOCAL AI (PaddleOCR-VL 1.6 + Chandra OCR 2)  -  free, offline
+=========================================================================
+
+WHAT IT DOES
+  Reads scanned PDFs, notes and formulas as images, using two vision models
+  that run ON YOUR PC (CPU) through llama.cpp:
+
+  vlm_paddle   PaddleOCR-VL 1.6 (Baidu, about 0.9 billion parameters)
+               fast; excellent on printed text, formulas (LaTeX) and tables.
+               Returns text and formulas; no structure, no figure descriptions.
+  vlm_chandra  Chandra OCR 2 (Datalab, about 5 billion, 4-bit quantized)
+               slow; the best open model on HANDWRITING;
+               returns headings/lists/tables/formulas and DESCRIBES figures
+               (which are also cropped into media\<name>\figure\).
+  vlm_ibrido   Paddle on everything, Chandra on the "high quality" pages you
+               choose and on pages where Paddle fails (too little text, loops).
+
+INSTALLATION (once)
+  Double-click  Installa_OCR_locale.bat
+   - installs 2 Python libraries and downloads the models into  .\modelli
+     (about 5 GB).
+   - llama.cpp is placed in  .\motori\llamacpp  by:  python ocr_vlm.py setup tutti
+   - if the download stops, run it again: it resumes where it left off.
+
+TEST (recommended before converting a whole book)
+  Drag a PDF onto  Prova_OCR_locale.bat  and choose 3-5 pages
+  (for example 12,115,381,400). It writes <name>_prova_paddle.md and
+  <name>_prova_chandra.md next to the PDF and prints the seconds per page.
+
+NORMAL USE
+  GUI: Engine = vlm_paddle / vlm_chandra / vlm_ibrido; fields appear for the
+       pages (empty = all) and the high-quality pages (Chandra).
+  CLI: python tomd2.py file.pdf --engine vlm_paddle
+       python tomd2.py file.pdf --engine vlm_chandra --pages 1-20
+       python tomd2.py book.pdf --engine vlm_ibrido --hq-pages 379-453
+  Options: --vlm-threads N (default = physical cores), --vlm-gpu (Vulkan, experimental)
+  Environment variables: TOMD2_CHANDRA_QUANT=IQ3_M (faster) or Q6_K
+  (more accurate, 4 GB); TOMD2_PADDLE_QUANT=Q6_K, etc.
+
+NEW IN VERSION 2
+  - Full Paddle pipeline: Baidu's official pipeline with the PP-DocLayoutV3
+    layout model splits the page into blocks (headings, paragraphs, formulas,
+    tables, figures, notes) and recognizes each block with the right prompt.
+    This is how PaddleOCR-VL was designed to work: much better than the whole
+    page, and it removes headers/footers and crops figures by itself.
+    Installation (once):   python ocr_vlm.py setup layout
+    If not installed, Paddle works as before (whole page).
+    To disable it: variable TOMD2_PADDLE_LAYOUT=0
+  - Chandra: figure descriptions in Italian (TOMD2_CHANDRA_LINGUA=en for the
+    original English), lists without double dashes.
+  - Progress during the page, immediate stop of loops, raw model text saved
+    in _vlm_cache (page_NNNN.raw.txt), never empty pages.
+  - Length limits: TOMD2_CHANDRA_MAXTOK (default 5000),
+    TOMD2_PADDLE_MAXTOK (default 3000).
+
+NEW IN VERSION 4 - TWO CHECKERS (still local and free)
+  Qwen3.5-9B (Alibaba, about 6.6 GB)   -> general-purpose vision model
+  GLM-4.6V-Flash (Zhipu, about 7 GB)   -> a different family, so it makes different mistakes
+  They run one at a time (16 GB of RAM is enough). Automatic routing:
+    PRINTED PAGES     Paddle -> formulas reread by Paddle (300 dpi) and Chandra;
+                      if they disagree, the GLM REFEREE decides (2 out of 3 wins).
+    HANDWRITTEN PAGES Chandra -> each block with formulas is cropped and
+                      reread by Qwen; if Chandra and Qwen disagree, the GLM
+                      referee decides.
+    FIGURES           Qwen describes them knowing what the page is about;
+                      GLM checks the description against the image; if it finds
+                      errors, Qwen rewrites it and GLM checks again.
+    LAST LEVEL        whatever still disagrees goes into
+                      <name>_da_controllare.md (crop + readings + CORRECTION).
+                      Correct it yourself or have Claude do it ONLY on those
+                      points, then run again: it applies them from the cache.
+  Installation (once, about 14 GB):  python ocr_vlm.py setup controllori
+  (it downloads and runs a start-up test; if a model does not start:
+   python ocr_vlm.py setup aggiorna-llamacpp)
+  Variables: TOMD2_DESCRIZIONI=qwen|chandra|0  TOMD2_VERIFICA_FIGURE=tutte|0
+             TOMD2_ARBITRO=glm|0  TOMD2_VERIFICA_MANO=1|0
+             TOMD2_GLOSSARIO="p pressure, a speed of sound, ..." (helps read
+             handwriting, for example p mistaken for k)
+  Indicative times on a laptop CPU: 3-6 min per figure (description + check),
+  1-3 min per handwritten block. Everything resumes from the cache if interrupted.
+
+  Update 4.1:
+  - the GLM checker now answers true/false to EVERY statement in the
+    description, mixed with 2 false "trap" statements: if it confirms a trap,
+    its check is void and the figure goes into the review file;
+  - corrections in the _da_controllare file: only your own edits count
+    (before, a changed automatic choice was taken for a correction);
+  - Qwen's LaTeX cleaned up ('\\frac { 1 } { 2 }' -> '\\frac{1}{2}');
+  - during a conversion the PC does not go to sleep by itself (closing the
+    lid still does).
+
+NEW IN VERSION 3 - FORMULA VERIFICATION
+  Each display formula on pages done by Paddle is read 3 times:
+    1) Paddle on the page (as before)
+    2) Paddle again, on a CROP of the formula at 300 dpi
+    3) Chandra on the same crop (a different model: different errors)
+  Readings are compared by CONTENT (spaces, \left/\right, \dfrac/\frac,
+  \text{...} etc. do not count):
+    - Paddle and Chandra match           -> CONFIRMED
+    - 2 of 3 readings match              -> decided by MAJORITY
+    - no agreement                       -> DOUBTFUL: a comment stays in the .md
+      with the alternatives (an AI reading the file knows that point is uncertain)
+  Everything ends up in  <name>_da_controllare.md  (next to the .md): for each
+  doubtful formula there is the image crop, the 3 readings, what changes
+  (e.g. <<= \sin \frac>> <-> <<= \arcsin \frac>>) and a CORRECTION block.
+  Correct there (or give the file to Claude and have it fix ONLY those), then
+  run the same command again: it uses the cache, no OCR, and applies the corrections.
+  In the same file: suspicious words (words that do not exist in it/en/fr/es/de
+  and appear only once: possible misreadings).
+  Also new: equation NUMBERS, e.g. (3.2), are no longer lost (\tag*{(3.2)}).
+  Extra time: about 10-30 s (Paddle) + 30-60 s (Chandra) per formula.
+  Variable TOMD2_VERIFICA_FORMULE:
+    tutte   (default) Chandra rereads all formulas
+    dubbie  Chandra only where the two Paddle readings differ
+    paddle  only the Paddle reread (no Chandra)
+    0       no verification
+  Pages already cached by version 2 are redone automatically.
+
+RESUME
+  Each finished page is saved in media\<name>\_vlm_cache\. If you close it or
+  the PC shuts down, run the same command again: it restarts from the first
+  missing page. To start over, delete that folder.
+
+REALISTIC EXPECTATIONS (8th-gen i5 CPU, 16 GB)
+  - Speed: measure it with the TEST. Paddle: tens of seconds to a few minutes
+    per page; Chandra: several minutes per page.
+  - Quality: printed text and formulas very good; handwriting fair with
+    Chandra; figure descriptions short compared with a transcription by
+    Claude. Formulas: triple reading + vote (version 3).
+
+FILES
+  ocr_vlm.py            engine (download, llama.cpp server, OCR, post-processing)
+  motori\llamacpp\      llama.cpp for Windows (CPU)
+  modelli\              .gguf model files
+  logs\llama_server_*.log   engine log (check it if something does not start)

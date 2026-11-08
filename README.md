@@ -74,8 +74,7 @@ Then try it on a few pages. This writes separate test files and leaves existing 
 python ocr_vlm.py prova file.pdf --pages 12,381 --engine tutti
 ```
 
-Original files are never changed or deleted. More detail is in `COME_USARE_tomd2.txt`, `LEGGIMI_OCR_IA_LOCALE.txt` and
-`tomdclaude/README.md` (all in Italian).
+Original files are never changed or deleted. More detail is in `USAGE.txt`, `LOCAL_OCR.txt` and `tomdclaude/README.md`.
 
 ## Tests
 

@@ -1,95 +1,96 @@
 # tomdclaude
 
-Sistema di conversione file **modulare** con **validazione gatekeeper**.
-Primo convertitore implementato: **Markdown → PDF leggibile** (stile report/articolo).
+A **modular** file conversion system with **gatekeeper validation**.
+First converter implemented: **readable Markdown → PDF** (report/article style).
 
-Affianca il convertitore universale esistente (`tomd2.py` + router) senza
-modificarlo: vive nel sottopacchetto `tomdclaude/`.
+It sits alongside the existing universal converter (`tomd2.py` + router) without
+changing it: it lives in the `tomdclaude/` subpackage.
 
-## Architettura
+## Architecture
 
 ```
 tomdclaude/
-├── core/            contratto, risultato, registry, pipeline (gatekeeper)
-│   ├── base_converter.py   BaseConverter (ABC): ogni convertitore è una classe
+├── core/            contract, result, registry, pipeline (gatekeeper)
+│   ├── base_converter.py   BaseConverter (ABC): each converter is a class
 │   ├── result.py           ConversionResult, ValidationIssue
-│   ├── registry.py         elenco convertitori + lookup per formato
-│   └── pipeline.py         orchestrazione: convert → validate → commit/abort
-├── converters/      un file = un convertitore indipendente
+│   ├── registry.py         list of converters + lookup by format
+│   └── pipeline.py         orchestration: convert → validate → commit/abort
+├── converters/      one file = one independent converter
 │   └── md_to_pdf.py        MarkdownToPdfConverter (markdown → HTML → WeasyPrint)
-├── validators/      il "gatekeeper": confronta i metadati
-│   ├── md_validator.py     struttura gerarchica dei titoli (MD)
-│   ├── pdf_validator.py    integrità del PDF (header, pagine, testo)
-│   └── xlsx_validator.py   righe/colonne per foglio (XLSX) — pronto all'uso
-├── utils/           logging, runtime GTK, estrazione metadati
-├── assets/report.css       foglio di stile del report
-├── examples/report_demo.md documento dimostrativo
-├── tests/test_md_to_pdf.py primo test case
-├── cli.py                  riga di comando
-└── logs/                   log dettagliati dei fallimenti
+├── validators/      the gatekeeper: compares metadata
+│   ├── md_validator.py     heading hierarchy (MD)
+│   ├── pdf_validator.py    PDF integrity (header, pages, text)
+│   └── xlsx_validator.py   rows/columns per sheet (XLSX), ready to use
+├── utils/           logging, GTK runtime, metadata extraction
+├── assets/report.css       report stylesheet
+├── examples/report_demo.md demo document
+├── tests/test_md_to_pdf.py first test case
+├── cli.py                  command line
+└── logs/                   detailed failure logs
 ```
 
-## Il gatekeeper (requisito chiave)
+## The gatekeeper (key requirement)
 
-Ogni conversione viene scritta su un **file temporaneo**. Diventa definitiva
-(commit atomico) **solo** se supera tutti i validatori. Se un validatore rileva
-una perdita o incoerenza di dati (es. un titolo perso, un PDF quasi vuoto), il
-temporaneo viene **scartato**, il file finale **non** viene salvato e viene
-prodotto un **log dettagliato** in `tomdclaude/logs/`.
+Each conversion is written to a **temporary file**. It becomes final (atomic
+commit) **only** if it passes every validator. If a validator detects data loss
+or an inconsistency (for example a lost heading or a nearly empty PDF), the
+temporary file is **discarded**, the final file is **not** saved, and a
+**detailed log** is written to `tomdclaude/logs/`.
 
-## MD → PDF: cosa produce
+## MD → PDF: what it produces
 
-- Copertina con titolo/autore/data (front-matter `title:` / `author:`)
-- **Indice automatico** con numeri di pagina (CSS `target-counter`)
-- Numerazione automatica dei capitoli (1, 1.1, 1.1.1)
-- Intestazione corrente + piè di pagina "Pagina X / Y"
-- Tabelle formattate, codice con syntax highlighting (Pygments), riquadri note
-- **Matematica LaTeX** `$...$` / `$$...$$` resa in SVG (font Computer Modern,
-  resa identica a LaTeX) senza richiedere una toolchain TeX — vedi sotto
-- Pulizia automatica dei marcatori di citazione `[cite_start]`/`[cite: N]`
-- Tipografia leggibile (serif, testo giustificato, sillabazione)
+- Cover with title/author/date (front matter `title:` / `author:`)
+- **Automatic table of contents** with page numbers (CSS `target-counter`)
+- Automatic chapter numbering (1, 1.1, 1.1.1)
+- Running header and page-number footer
+- Formatted tables, code with syntax highlighting (Pygments), note boxes
+- **LaTeX math** `$...$` / `$$...$$` rendered as SVG (Computer Modern font, a
+  LaTeX look) without needing a TeX toolchain (see below)
+- Automatic removal of the citation markers `[cite_start]`/`[cite: N]`
+- Readable typography (serif, justified text, hyphenation)
 
-## Matematica senza LaTeX
+## Math without LaTeX
 
-Le formule vengono isolate da `pymdownx.arithmatex` (i blocchi di codice non
-sono toccati) e rese in **SVG** dal motore *mathtext* di matplotlib
-(`mathtext.fontset = cm`). Inline allineate alla linea di base, display centrate.
-Una sanitizzazione converte le piccole differenze di sintassi (`\le`→`\leq`,
-`\dfrac`→`\frac`, rimozione di `\Big`, `\displaystyle`, ...).
+Formulas are isolated by `pymdownx.arithmatex` (code blocks are left alone) and
+rendered as **SVG** by matplotlib's *mathtext* engine (`mathtext.fontset = cm`).
+Inline formulas align with the baseline; display formulas are centered.
+A sanitizing step converts small syntax differences (`\le`→`\leq`,
+`\dfrac`→`\frac`, removal of `\Big`, `\displaystyle`, ...).
 
-Copertura testata: 236/236 formule sul documento reale di Metodi Numerici.
-Le espressioni non renderizzabili non bloccano (di default): restano visibili
-come testo grezzo e finiscono nel log; con `--strict-math` diventano bloccanti.
+Tested coverage: 236/236 formulas on a real numerical methods document.
+Expressions that cannot be rendered do not block by default: they stay visible
+as raw text and go into the log; with `--strict-math` they become blocking.
 
-Limite: mathtext non supporta gli ambienti `\begin{matrix|align|cases}` (assenti
-nei documenti target). Per quelli servirebbe una toolchain TeX (MiKTeX + dvisvgm).
+Limit: mathtext does not support `\begin{matrix|align|cases}` environments
+(absent from the target documents). Those would need a TeX toolchain
+(MiKTeX + dvisvgm).
 
-## Uso
+## Usage
 
 ```bash
-# dalla cartella che contiene il package ("CONVERTITORE .md")
+# from the folder that contains the package
 python -m tomdclaude examples/report_demo.md --to pdf
-python -m tomdclaude appunti.md -o build/appunti.pdf --title "Metodi Numerici"
+python -m tomdclaude notes.md -o build/notes.pdf --title "Numerical Methods"
 python -m tomdclaude --list
 
-# opzioni utili
-#   --no-math          non renderizzare la matematica
-#   --strict-math      rifiuta il PDF se una formula non viene resa
-#   --keep-citations   non rimuovere i marcatori [cite_start]/[cite: N]
+# useful options
+#   --no-math          do not render the math
+#   --strict-math      reject the PDF if a formula cannot be rendered
+#   --keep-citations   do not remove the [cite_start]/[cite: N] markers
 
-# test (6/6)
+# tests (6/6)
 python -m tomdclaude.tests.test_md_to_pdf
 ```
 
-## Dipendenze
+## Dependencies
 
-`pip install -r tomdclaude/requirements.txt` + runtime GTK3 su Windows
-(`winget install --id tschoonj.GTKForWindows -e`). Il modulo `utils/gtk.py`
-aggancia GTK automaticamente a runtime.
+`pip install -r tomdclaude/requirements.txt` plus the GTK3 runtime on Windows
+(`winget install --id tschoonj.GTKForWindows -e`). The `utils/gtk.py` module
+hooks GTK automatically at run time.
 
-## Struttura aggiornata (con matematica)
+## Math modules
 
 ```
-converters/math_render.py   MathRenderer: LaTeX -> SVG via matplotlib mathtext
-validators/math_validator.py  conta le formule non rese (gatekeeper)
+converters/math_render.py     MathRenderer: LaTeX -> SVG via matplotlib mathtext
+validators/math_validator.py  counts the formulas that were not rendered (gatekeeper)
 ```

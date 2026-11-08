@@ -1,0 +1,337 @@
+================================================================================
+              HOW TO USE  tomd2  +  convert  (universal converter)
+                  Convert ANY format to ANY other format
+                       Free, local, no GPU needed
+================================================================================
+
+WHAT IT IS FOR
+--------------
+Two tools, one folder:
+
+(1) tomd2.py      -> HIGH-FIDELITY conversion to Markdown.
+                     Keeps text, tables, LaTeX formulas, images and page images.
+                     Accepts 170 input extensions.
+
+(2) convert.py    -> UNIVERSAL converter: any format -> any other, where that
+                     makes sense. If the pair is not supported, it shows a clear
+                     error listing the available target formats.
+
+(3) tomd2_gui.py  -> graphical interface for both (drag and drop files/folders,
+                     dynamic "Convert to" selector, real-time log).
+
+ORIGINAL files are never changed or deleted.
+
+
+================================================================================
+PART 1 - ONE-TIME INSTALLATION
+================================================================================
+
+STEP 1.1 - Python 3.10+
+-----------------------
+Download from https://www.python.org/downloads/ and tick "Add python.exe to PATH".
+Check: `python --version` in PowerShell.
+
+
+STEP 1.2 - Python libraries (a single command)
+----------------------------------------------
+    python -m pip install -U pymupdf pymupdf4llm markitdown openpyxl python-pptx ^
+        pandas pillow img2pdf cairosvg pypandoc tkinterdnd2 openai-whisper
+
+What they are for:
+  pymupdf, pymupdf4llm  high-fidelity text extraction from PDF
+  markitdown            converts docx/html/epub/json/xml/...
+  openpyxl              clean Excel (no NaN, no Unnamed)
+  python-pptx           PowerPoint, extracts the images
+  pandas                CSV/JSON/Excel/Parquet
+  pillow, img2pdf       images
+  cairosvg              SVG
+  pypandoc              Python wrapper for Pandoc
+  tkinterdnd2           drag and drop in the GUI
+  openai-whisper        audio/video transcription (requires ffmpeg)
+
+
+STEP 1.3 - External tools (for the universal converter)
+-------------------------------------------------------
+Open PowerShell and run:
+
+    winget install --id JohnMacFarlane.Pandoc -e
+    winget install --id TheDocumentFoundation.LibreOffice -e
+    winget install --id Gyan.FFmpeg -e
+    winget install --id ImageMagick.ImageMagick -e
+
+What they are for:
+  Pandoc          text documents (md, docx, html, epub, tex, ...)
+  LibreOffice     Office <-> PDF (docx/xlsx/pptx <-> pdf, etc.)
+  FFmpeg          audio/video (mp3/wav/mp4/mkv/gif, ...)
+  ImageMagick     fallback for unusual image formats
+
+If a tool is missing at conversion time, the script does NOT crash:
+it tells you which one is missing and the winget command to install it.
+
+
+================================================================================
+PART 2 - USING THE UNIVERSAL CONVERTER (convert.py)
+================================================================================
+
+BASIC EXAMPLES
+--------------
+Single conversion:
+    python convert.py report.docx --to pdf
+    python convert.py figure.png --to jpg
+    python convert.py sheet.xlsx --to csv
+
+Explicit output name:
+    python convert.py report.docx final_report.pdf
+
+Batch (all files of one type):
+    python convert.py *.docx --to pdf
+    python convert.py *.png --to webp
+    python convert.py *.mp4 --to mp3
+
+PDF -> Markdown (high fidelity, tomd2 engine):
+    python convert.py course.pdf --to md
+    python convert.py *.pdf --to md
+
+LIST OF POSSIBLE CONVERSIONS
+----------------------------
+    python convert.py --list
+
+Shows every source -> target pair, grouped by category.
+
+ERROR HANDLING WHEN A CONVERSION MAKES NO SENSE
+-----------------------------------------------
+    python convert.py sheet.xlsx --to mp3
+
+The tool replies that .xlsx -> .mp3 is not supported, names the source and
+target categories, and lists the formats .xlsx can be converted to:
+    .csv, .docx, .html, .json, .markdown, .md, .odt, .parquet, .pdf, .pptx, .tsv, .txt
+
+USEFUL OPTIONS
+--------------
+  --overwrite               overwrite existing output (on by default)
+  --no-overwrite            skip if the output already exists
+
+  Markdown:
+  --page-image-dpi 200      sharper pages (default 150)
+  --no-page-images          no page images
+  --vector-threshold 5      drawing threshold for rendering a page (default 3)
+  --media-dir figures       change the media folder (default 'media')
+  --engine pymupdf4llm      force a tomd2 engine (auto/pymupdf4llm/marker/ocr_scan/...)
+  --force-ocr               force OCR (marker engine only)
+  --block-size 15           run marker in blocks of 15 pages (8 GB RAM)
+  --whisper-model base      tiny/base/small/medium/large for audio/video
+
+  Media (audio/video/images):
+  --quality 90              jpg/webp 1-100
+  --width 1024 --height 768 resize images
+  --fps 24                  fps for video or gif
+  --bitrate 192k            audio/video
+  --image cover.png         background for audio -> video
+
+  Tabular data:
+  --sheet "Sheet2"          choose the xlsx sheet
+  --sep ";"                 csv separator
+
+
+================================================================================
+PART 3 - USING THE GUI (tomd2_gui.py)
+================================================================================
+Open it with:
+    python tomd2_gui.py
+
+FEATURES
+1. Drag files/folders onto the list at the top
+2. The "Convert to" box UPDATES DYNAMICALLY based on the loaded files:
+   it shows only the target formats reachable from ALL your files.
+3. Markdown mode: choose ".md" and tomd2 does the high-fidelity conversion
+4. Universal mode: choose ".pdf", ".docx", ".mp3", ".jpg", etc. and it uses the router
+5. Settings are saved in `.tomd2_gui_config.json` and restored on restart
+6. Lean Markdown checkbox (no <details>) to reduce boilerplate (suggested by Gemini)
+7. Keep-awake: the PC does not sleep during a conversion
+8. Resume support: marker in block mode continues from the finished blocks
+
+
+================================================================================
+PART 4 - SUPPORTED CATEGORIES AND CONVERSIONS
+================================================================================
+(short list; for the full one: `python convert.py --list`)
+
+TEXT DOCUMENTS (via Pandoc)
+  .md .docx .odt .rtf .html .epub .txt .tex
+  -> every combination among them + .pdf (with automatic fallback)
+
+OFFICE DOCUMENTS / PDF (via LibreOffice)
+  .docx .doc .xlsx .xls .odt .ods .pptx .ppt .odp .pdf
+  -> .pdf .docx .odt .html .txt .xlsx .csv .pptx (and .pdf -> .docx, etc.)
+
+TABULAR DATA (via pandas)
+  .csv .tsv .xlsx .xls .ods .json
+  -> .csv .tsv .xlsx .json .parquet
+  (with smart detection of titles, headers and units of measurement)
+
+IMAGES (via Pillow + img2pdf + cairosvg)
+  .png .jpg .webp .tiff .bmp .gif .svg
+  -> .png .jpg .webp .tiff .bmp .gif .pdf .ico
+  (HEIC also requires: pip install pillow-heif)
+
+AUDIO/VIDEO (via FFmpeg)
+  Audio: .mp3 .wav .flac .aac .ogg .m4a .opus .wma
+  Video: .mp4 .mov .avi .mkv .webm .flv .wmv .m4v
+  Conversions:
+    audio -> audio        (re-encode)
+    video -> audio        (extract the soundtrack)
+    video -> video        (transcoding)
+    video -> gif          (animated clip)
+    audio -> video        (audio + still image)
+    gif -> mp4            (compatibility)
+
+HIGH-FIDELITY MARKDOWN (via tomd2)
+  All 170 formats supported by tomd2 -> .md
+  (PDF, Office, Python/JS/C code..., Jupyter, .eml email, .zip archives, ...)
+
+
+================================================================================
+PART 5 - TYPICAL USE CASES
+================================================================================
+
+A) I want to give a book or lecture notes to an AI
+    python convert.py *.pdf --to md
+    -> you get high-fidelity .md with tables, LaTeX formulas and page images of diagrams.
+
+B) I want to convert a presentation to PDF
+    python convert.py presentation.pptx --to pdf
+
+C) I want to extract the audio from a video
+    python convert.py lecture.mp4 --to mp3
+
+D) I want a GIF from a short video
+    python convert.py clip.mp4 --to gif --fps 12
+
+E) I have an Excel sheet and want it as CSV and JSON
+    python convert.py data.xlsx --to csv
+    python convert.py data.xlsx --to json
+
+F) I want to transcribe an audio file
+    python convert.py podcast.mp3 --to md --whisper-model base
+
+G) I want to turn photos into a PDF album
+    python convert.py *.jpg --to pdf
+
+H) Word document -> PDF
+    python convert.py report.docx --to pdf
+    (if LaTeX is missing, it falls back automatically to LibreOffice)
+
+
+================================================================================
+PART 6 - MARKDOWN QUALITY IMPROVEMENTS (suggested by 3 LLMs)
+================================================================================
+Gemini, ChatGPT and DeepSeek reviewed the quality of tomd2.
+Their findings were integrated:
+
+1. MOJIBAKE FIX (DeepSeek):
+   - Wrong characters such as "тАФ" "┬«" "┬»" are turned into "—" "«" "»" automatically.
+
+2. ORIGINAL TEXT WHEN FORMULAS BECOME IMAGES (Gemini):
+   - If pymupdf4llm traps a formula as an image but the PDF had selectable
+     text, the .md file adds a raw-text section with the pymupdf content, so
+     an AI can still read the formulas.
+
+3. LEAN MARKDOWN (Gemini):
+   - The --lean-md flag (or the GUI checkbox) uses compact links instead of
+     <details><summary>, reducing boilerplate tokens.
+
+
+================================================================================
+PART 7 - COMMON PROBLEMS AND SOLUTIONS
+================================================================================
+
+PROBLEM: "ModuleNotFoundError: pymupdf4llm" or similar
+SOLUTION: repeat STEP 1.2.
+
+PROBLEM: the tool reports that Pandoc or soffice is missing
+SOLUTION: you skipped STEP 1.3. Run the winget commands.
+          Restart PowerShell after installing.
+
+PROBLEM: scanned PDF -> the .md is empty
+CAUSE:   it has no selectable text (images only).
+SOLUTION: use marker:
+    python tomd2.py scan.pdf --engine marker --force-ocr --block-size 15
+  (slow on a PC without a GPU: about 1 hour for 15 pages).
+
+PROBLEM: marker hangs / Out Of Memory
+SOLUTION: smaller blocks:
+    --block-size 10
+  and close your browser, Office and Teams.
+
+PROBLEM: I want to redo a large conversion and I lose blocks halfway
+SOLUTION: tomd2 with marker RESUMES automatically. Run it again: finished
+          blocks are SKIPPED.
+
+PROBLEM: scanned PDF WITH OCR (for example from an online archive)
+SOLUTION: tomd2 detects it and uses the 'ocr_scan' engine (OCR text kept,
+          plus page images as a visual backup).
+
+PROBLEM: audio -> .md but whisper is missing
+SOLUTION: pip install -U openai-whisper, and install ffmpeg via winget.
+
+PROBLEM: .mobi/.azw3/.djvu files do not convert
+SOLUTION: you need Calibre (https://calibre-ebook.com). Once installed:
+    ebook-convert "book.mobi" "book.epub"
+  then: python tomd2.py "book.epub"
+
+
+
+================================================================================
+NEW - FAST OCR AND NEW CONVERSIONS
+================================================================================
+
+TESSERACT OCR (new, automatic):
+  - Images (.png .jpg ...) -> .md : now use Tesseract (SECONDS, not hours).
+    The text inside the image is extracted and placed in the .md.
+  - Scanned PDFs WITHOUT text -> .md : automatic OCR page by page.
+    (marker remains available with --engine marker for maximum quality)
+  - Languages: Italian + English by default. Change with --ocr-lang (e.g. "deu").
+
+NEW CONVERSIONS:
+  - PDF -> images:     python convert.py doc.pdf --to png   (multi-page: _p001, _p002...)
+  - md/docx -> PPTX:   python convert.py notes.md --to pptx (each heading = one slide)
+  - audio/video -> subtitles: python convert.py lecture.mp4 --to srt
+                              python convert.py voice.wav --to vtt
+    (uses Whisper: --whisper-model tiny/base/small for speed versus quality)
+  - HEIC (iPhone photos) now supported (requires pillow-heif)
+  - .ods (LibreOffice Calc) now also convertible with pandas (requires odfpy)
+
+
+AI-PACK: IMAGE-HEAVY PDFs -> LIGHTWEIGHT .MD FOR AI (new)
+  Problem: photographic slides (astronomy, art, medicine) produce md plus PNG
+  images of hundreds of MB, which no AI chat accepts.
+  Solution:
+      python tomd2.py "*.pdf" --engine ai_pack --overwrite
+  Each page becomes ONE WebP image (quality 70, longest side 1568 px, the
+  maximum resolution Claude and GPT actually use) plus all the text of the
+  page (PDF text layer, or automatic OCR on pages without text).
+  Typical reduction: 3-20x. Visual quality: text and diagrams stay readable.
+  Options: --ai-quality 60..85 (size versus quality), --ai-max-side 1200 (lighter).
+  From the GUI: Engine = ai_pack.
+
+IMPROVED XLSX -> PDF:
+  - automatic fit-to-width and landscape orientation for wide sheets
+  - automatic column widths: no text cut off when printing
+
+================================================================================
+QUICK SUMMARY
+================================================================================
+
+# Single conversion
+python convert.py input.docx --to pdf
+python convert.py input.pdf --to md
+python convert.py video.mp4 --to mp3
+
+# Batch
+python convert.py *.docx --to pdf
+
+# List supported pairs
+python convert.py --list
+
+# GUI
+python tomd2_gui.py

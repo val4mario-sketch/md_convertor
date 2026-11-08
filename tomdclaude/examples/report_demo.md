@@ -1,74 +1,73 @@
-title: Relazione Tecnica — Sistema di Conversione File
+title: Technical Report — File Conversion System
 author: tomdclaude
 
-# Introduzione
+# Introduction
 
-Questo documento dimostra la conversione **Markdown → PDF** ad alta leggibilità
-prodotta da `tomdclaude`. L'obiettivo non è una stampa grezza del sorgente, ma un
-*documento in stile report*: copertina, indice automatico con numeri di pagina,
-numerazione dei capitoli, tabelle pulite e codice con evidenziazione della sintassi.
+This document demonstrates the highly readable **Markdown → PDF** conversion
+produced by `tomdclaude`. The goal is not a raw printout of the source but a
+*report-style document*: cover, automatic table of contents with page numbers,
+chapter numbering, clean tables and code with syntax highlighting.
 
-Il testo è giustificato e sillabato per migliorare la leggibilità su pagina A4.
+The text is justified and hyphenated to improve readability on an A4 page.
 
-## Obiettivi del progetto
+## Project goals
 
-1. Convertire qualunque formato in qualunque altro, dove ha senso.
-2. Mantenere l'alta fedeltà verso Markdown per l'uso con un LLM.
-3. Non salvare mai un file che non superi i controlli di integrità.
+1. Convert any format to any other, where that makes sense.
+2. Keep high fidelity to Markdown for use with an LLM.
+3. Never save a file that fails the integrity checks.
 
-## Vincoli
+## Constraints
 
-- Tutto **gratuito e in locale**, nessuna API a pagamento.
-- Nessun upload dei documenti.
-- Funzionamento su macchina senza GPU.
+- Everything is **free and local**, with no paid APIs.
+- No document uploads.
+- Works on a machine without a GPU.
 
-# Architettura
+# Architecture
 
-Il sistema è organizzato in moduli indipendenti. Ogni convertitore è una classe
-che eredita da `BaseConverter` ed espone un contratto uniforme.
+The system is organized into independent modules. Each converter is a class
+that inherits from `BaseConverter` and exposes a uniform contract.
 
-## Confronto fra i motori
+## Engine comparison
 
-La tabella seguente riassume le scelte tecniche valutate per il percorso
-Markdown → PDF.
+The following table summarizes the technical options evaluated for the
+Markdown → PDF path.
 
-| Motore       | Fedeltà tipografica | Controllo CSS | Tabelle | Note                      |
-| :----------- | :------------------ | :------------ | :------ | :------------------------ |
-| WeasyPrint   | Alta                | Totale (CSS)  | Ottime  | Scelto per i report       |
-| LaTeX/Pandoc | Altissima           | Indiretto     | Buone   | Richiede una toolchain TeX |
-| ReportLab    | Media               | Manuale       | Manuali | Troppo basso livello      |
+| Engine       | Typographic fidelity | CSS control  | Tables | Notes                  |
+| :----------- | :------------------- | :----------- | :----- | :--------------------- |
+| WeasyPrint   | High                 | Full (CSS)   | Great  | Chosen for reports     |
+| LaTeX/Pandoc | Very high            | Indirect     | Good   | Needs a TeX toolchain  |
+| ReportLab    | Medium               | Manual       | Manual | Too low-level          |
 
-> WeasyPrint permette di controllare l'impaginazione con CSS standard, incluse
-> intestazioni, piè di pagina e numeri di pagina nell'indice.
+> WeasyPrint controls the layout with standard CSS, including headers, footers
+> and page numbers in the table of contents.
 
-## Esempio di codice
+## Code example
 
-Il cuore del gatekeeper: la conversione viene salvata solo se valida.
+The heart of the gatekeeper: the conversion is saved only if it is valid.
 
 ```python
 def commit_or_abort(tmp, dst, issues):
     if any(i.blocking for i in issues):
-        tmp.unlink(missing_ok=True)   # niente file in caso di perdita dati
-        raise ValueError("conversione rifiutata dal validator")
-    os.replace(tmp, dst)              # commit atomico
+        tmp.unlink(missing_ok=True)   # no file if data was lost
+        raise ValueError("conversion rejected by the validator")
+    os.replace(tmp, dst)              # atomic commit
 ```
 
-# Validazione
+# Validation
 
-Il modulo *Validator* confronta i metadati del sorgente con quelli del prodotto.
+The *Validator* module compares the source metadata with that of the product.
 
-!!! note "Principio del gatekeeper"
-    Nessun file viene scritto sulla destinazione finché tutti i controlli di
-    integrità non sono superati. In caso contrario viene prodotto un log
-    dettagliato dell'errore.
+!!! note "The gatekeeper principle"
+    No file is written to the destination until all the integrity checks have
+    passed. Otherwise a detailed error log is produced.
 
-## Controlli implementati
+## Implemented checks
 
-- **Struttura gerarchica (MD):** la sequenza dei livelli dei titoli deve coincidere.
-- **Integrità PDF:** header valido, almeno una pagina, testo non sproporzionato.
-- **Righe/colonne (XLSX):** nessun foglio, riga o colonna persa.
+- **Heading hierarchy (MD):** the sequence of heading levels must match.
+- **PDF integrity:** valid header, at least one page, text in proportion.
+- **Rows/columns (XLSX):** no sheet, row or column lost.
 
-# Conclusioni
+# Conclusions
 
-Il percorso Markdown → HTML → PDF con WeasyPrint produce documenti leggibili e
-professionali, mantenendo il pieno controllo dello stile tramite CSS.
+The Markdown → HTML → PDF path with WeasyPrint produces readable, professional
+documents, with full control of the style through CSS.
