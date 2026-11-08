@@ -1,4 +1,4 @@
-# Convertitore Universale
+# Universal Converter
 
 A local file converter for Windows, with a desktop GUI and a command line. Its main job is turning documents, including scanned
 PDFs and handwritten notes, into clean Markdown that an LLM can read. It also converts between document, data, image and media
