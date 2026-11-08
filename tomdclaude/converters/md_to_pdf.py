@@ -178,7 +178,7 @@ class MarkdownToPdfConverter(BaseConverter):
         }
         note = f"Report-style PDF via WeasyPrint (title: {title!r})"
         if math_stats.total:
-            note += f"; matematica {math_stats.ok}/{math_stats.total}"
+            note += f"; math {math_stats.ok}/{math_stats.total}"
         return {"note": note, "metadata": md_meta}
 
     # ------------------------------------------------------------------- interni
@@ -207,7 +207,7 @@ class MarkdownToPdfConverter(BaseConverter):
 
         toc_section = ""
         if toc_html.strip():
-            toc_section = f'<nav class="toc"><h2>Indice</h2>\n{toc_html}\n</nav>'
+            toc_section = f'<nav class="toc"><h2>Contents</h2>\n{toc_html}\n</nav>'
 
         author_html = f'<p class="doc-author">{_html.escape(author)}</p>' if author else ""
 

@@ -242,7 +242,7 @@ def ensure_model(key: str) -> dict:
         dest = MODELS_DIR / (local or remote)
         if dest.exists() and dest.stat().st_size > 0:
             continue
-        _log(f"Scarico {spec['nome']}: {remote} (one time) ...")
+        _log(f"Downloading {spec['nome']}: {remote} (one time) ...")
         url = f"{HF}/{repo}/resolve/main/{remote}?download=true"
         try:
             _download(url, dest, label=remote)
@@ -282,7 +282,7 @@ def ensure_llamacpp(gpu: bool = False) -> Path:
         raise RuntimeError("llama-server not found (install llama.cpp or set TOMD2_LLAMA_SERVER).")
     flavor = "vulkan-x64" if gpu else "cpu-x64"
     target = MOTORI_DIR / ("llamacpp-vulkan" if gpu else "llamacpp")
-    _log(f"Scarico llama.cpp ({flavor}) from GitHub ...")
+    _log(f"Downloading llama.cpp ({flavor}) from GitHub ...")
     with urllib.request.urlopen(urllib.request.Request(
             "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
             headers={"User-Agent": "tomd2"}), timeout=60) as r:
@@ -383,7 +383,7 @@ class LlamaServer:
                 break
             _log("  [warning] start-up failed with the chat template: retrying without.")
         raise RuntimeError(f"llama-server does not start for {self.spec['nome']}: "
-                           f"guarda {LOG_DIR / f'llama_server_{self.key}.log'} "
+                           f"see {LOG_DIR / f'llama_server_{self.key}.log'} "
                            "(often: llama.cpp too old or not enough RAM)")
 
     def stop(self):
@@ -468,7 +468,7 @@ class LlamaServer:
                     speed = ntok / max(now - (t_first or t0), 1e-6)
                     pct = ""
                     if expected_tokens:
-                        pct = f" (~{min(99, int(ntok * 100 / expected_tokens))}% stimato)"
+                        pct = f" (~{min(99, int(ntok * 100 / expected_tokens))}% estimated)"
                     tail = "".join(parts)[-70:].replace("\n", " ").strip()
                     _log(f"    {label} {ntok} token{pct} | {speed:.1f} t/s | ...{tail}")
                 # loop check every ~100 tokens: if it repeats, stop right away
@@ -996,7 +996,7 @@ def convert_file(src: Path, mode: str, args=None,
                 done_jobs += 1
                 media = sum(stats[key]) / max(1, len(stats[key]))
                 eta = media * (len(todo) - j)
-                _log(f"  [{key}] pagina {p} ({j}/{len(todo)}): {meta.get('secondi',0):.0f} s"
+                _log(f"  [{key}] page {p} ({j}/{len(todo)}): {meta.get('secondi',0):.0f} s"
                      f"{'  [LOOP]' if meta.get('loop') else ''}"
                      f"{'  [CUT AT THE LIMIT]' if meta.get('fermato') == 'limite' else ''}"
                      f"  | time left {eta/60:.0f} min")
@@ -1006,7 +1006,7 @@ def convert_file(src: Path, mode: str, args=None,
     t_start = time.time()
     retry = run_engine("paddle", plan["paddle"])
     if retry:
-        _log(f"  [ibrido] {len(retry)} suspicious pages go to Chandra: {retry}")
+        _log(f"  [hybrid] {len(retry)} suspicious pages go to Chandra: {retry}")
         total_jobs += len(retry)
     run_engine("chandra", sorted(set(plan["chandra"]) | set(retry)))
 
@@ -1037,16 +1037,16 @@ def convert_file(src: Path, mode: str, args=None,
     for p in pages:
         key, md = results.get(p, ("?", "*(page not converted)*"))
         issues += math_issues(md)
-        parts.append(f"\n\n<!-- ===== Pagina {p} di {n} | motore: {key} ===== -->\n")
+        parts.append(f"\n\n<!-- ===== Page {p} of {n} | engine: {key} ===== -->\n")
         if p in page_links:
             parts.append(f"<!-- page image: {page_links[p]} -->\n")
         parts.append("\n" + md + "\n")
     tot = time.time() - t_start
     sp = stats["paddle"]; sc = stats["chandra"]
-    summary = (f"<!-- OCR VLM locale: {len(pages)} pagine | "
+    summary = (f"<!-- OCR VLM locale: {len(pages)} pages | "
                f"Paddle {len(sp)} pages (average {sum(sp)/max(1,len(sp)):.0f} s) | "
                f"Chandra {len(sc)} pages (average {sum(sc)/max(1,len(sc)):.0f} s) | "
-               f"suspicious formulas: {issues} | totale {tot/60:.1f} min -->\n")
+               f"suspicious formulas: {issues} | total {tot/60:.1f} min -->\n")
     _log("  " + summary.strip("<!-> \n"))
     return summary + "".join(parts).strip() + "\n", assets
 

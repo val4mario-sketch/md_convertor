@@ -108,7 +108,7 @@ def _read_excel(src: Path, opts: dict) -> tuple[pd.DataFrame, str]:
             df = sheets[first_name]
             if len(sheets) > 1:
                 note_extra = (
-                    f"Sheet used: '{first_name}'. Trovati {len(sheets)} sheets "
+                    f"Sheet used: '{first_name}'. Found {len(sheets)} sheets "
                     f"in total; pass opts['sheet'] to choose a different one."
                 )
             else:
@@ -248,7 +248,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
                 "ok": False,
                 "note": (
                     f"Input extension '{src_ext}' not supported. "
-                    f"Supportate: {', '.join(SUPPORTED_INPUTS)}."
+                    f"Supported: {', '.join(SUPPORTED_INPUTS)}."
                 ),
                 "elapsed": time.perf_counter() - t0,
             }
@@ -258,7 +258,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
                 "ok": False,
                 "note": (
                     f"Output extension '{dst_ext}' not supported. "
-                    f"Supportate: {', '.join(SUPPORTED_OUTPUTS)}."
+                    f"Supported: {', '.join(SUPPORTED_OUTPUTS)}."
                 ),
                 "elapsed": time.perf_counter() - t0,
             }
@@ -267,7 +267,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             return {
                 "ok": False,
                 "note": (
-                    f"Coppia {src_ext} -> {dst_ext} not supported. "
+                    f"Pair {src_ext} -> {dst_ext} not supported. "
                     f"Try an intermediate format among: "
                     f"{', '.join(SUPPORTED_OUTPUTS)}."
                 ),

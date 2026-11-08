@@ -243,7 +243,7 @@ def _pdf_to_txt_pymupdf(src: Path, dst: Path, t0: float) -> dict | None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_text(text + "\n", encoding="utf-8")
         return {"ok": True,
-                "note": f"converted .pdf -> .txt via PyMuPDF ({len(text)} caratteri)",
+                "note": f"converted .pdf -> .txt via PyMuPDF ({len(text)} characters)",
                 "elapsed": time.perf_counter() - t0}
     except Exception:
         return None  # if anything goes wrong, fall back to LibreOffice
@@ -287,19 +287,19 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
     if se not in SUPPORTED_INPUTS:
         return {"ok": False,
                 "note": f"input extension '{se}' not supported by this module. "
-                        f"Supportate: {sorted(SUPPORTED_INPUTS)}",
+                        f"Supported: {sorted(SUPPORTED_INPUTS)}",
                 "elapsed": time.perf_counter() - t0}
 
     if de not in SUPPORTED_OUTPUTS:
         return {"ok": False,
                 "note": f"output extension '{de}' not supported by this module. "
-                        f"Supportate: {sorted(SUPPORTED_OUTPUTS)}",
+                        f"Supported: {sorted(SUPPORTED_OUTPUTS)}",
                 "elapsed": time.perf_counter() - t0}
 
     if not supports(se, de):
         alt = _list_alternatives(se)
         return {"ok": False,
-                "note": (f"conversione {se} -> {de} not supported. "
+                "note": (f"conversion {se} -> {de} not supported. "
                          f"Alternatives for {se}: {alt}"),
                 "elapsed": time.perf_counter() - t0}
 
@@ -440,7 +440,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
 
     elapsed = time.perf_counter() - t0
     return {"ok": True,
-            "note": f"convertito {se} -> {de} via LibreOffice ({Path(soffice).name}){fit_note}",
+            "note": f"converted {se} -> {de} via LibreOffice ({Path(soffice).name}){fit_note}",
             "elapsed": elapsed}
 
 

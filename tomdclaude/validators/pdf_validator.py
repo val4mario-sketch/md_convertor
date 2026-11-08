@@ -47,6 +47,6 @@ class PdfIntegrityValidator(Validator):
                 issues.append(self.error(
                     "text_too_short",
                     "The extractable text of the PDF is too short: render probably failed.",
-                    expected=f">= {soglia} caratteri", actual=pdf_len))
+                    expected=f">= {soglia} characters", actual=pdf_len))
 
         return issues

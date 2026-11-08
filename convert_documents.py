@@ -232,7 +232,7 @@ def convert(src: Path, dst: Path, opts: Optional[dict] = None) -> dict:
         return _result(
             False,
             (
-                f"Conversione {src_ext}->{dst_ext} not supported by Pandoc. "
+                f"Conversion {src_ext}->{dst_ext} not supported by Pandoc. "
                 f"Target formats available from {src_ext}: {targets}"
             ),
             t0,
@@ -285,7 +285,7 @@ def convert(src: Path, dst: Path, opts: Optional[dict] = None) -> dict:
                         False,
                         (
                             "Generating PDFs needs a LaTeX engine (e.g. MiKTeX or TeX Live). "
-                            f"Dettagli: {msg.strip()}"
+                            f"Details: {msg.strip()}"
                         ),
                         t0,
                     )
@@ -303,7 +303,7 @@ def convert(src: Path, dst: Path, opts: Optional[dict] = None) -> dict:
                 False,
                 (
                     "Generating PDFs needs a LaTeX engine (e.g. MiKTeX or TeX Live). "
-                    f"Dettagli: {err}"
+                    f"Details: {err}"
                 ),
                 t0,
             )
@@ -319,7 +319,7 @@ def convert(src: Path, dst: Path, opts: Optional[dict] = None) -> dict:
                     False,
                     (
                         "Generating PDFs needs a LaTeX engine (e.g. MiKTeX or TeX Live). "
-                        f"Dettagli: {err}"
+                        f"Details: {err}"
                     ),
                     t0,
                 )
@@ -339,7 +339,7 @@ def convert(src: Path, dst: Path, opts: Optional[dict] = None) -> dict:
     if size <= 0:
         return _result(False, "The output file is empty.", t0)
 
-    note = f"Conversione {src_ext}->{dst_ext} riuscita ({size} byte)."
+    note = f"Conversion {src_ext}->{dst_ext} successful ({size} byte)."
     if note_warn:
         note += " " + note_warn
     return _result(True, note, t0)

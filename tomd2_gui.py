@@ -169,7 +169,7 @@ class TomdGui:
         self.lbl_count.pack(side="right")
 
         # ===== Section 2: Options =====
-        ttk.Label(root, text="2) Opzioni",
+        ttk.Label(root, text="2) Options",
                   font=("Segoe UI", 11, "bold")).pack(anchor="w")
         opts = ttk.LabelFrame(root, text="Settings", padding=10)
         opts.pack(fill="x", pady=(4, 8))
@@ -275,7 +275,7 @@ class TomdGui:
         self.btn_convert = ttk.Button(actions, text="▶ START CONVERSION",
                                       command=self._start, style="Accent.TButton")
         self.btn_convert.pack(side="left")
-        self.btn_cancel = ttk.Button(actions, text="■ Annulla", command=self._cancel,
+        self.btn_cancel = ttk.Button(actions, text="■ Cancel", command=self._cancel,
                                      state="disabled", style="Danger.TButton")
         self.btn_cancel.pack(side="left", padx=8)
         ttk.Button(actions, text="📂 Open output folder",
@@ -630,7 +630,7 @@ class TomdGui:
                     self.queue.put(("PROG", (i, len(self.files), f.name)))
 
             ok = sum(1 for r in results if r["ok"])
-            self.queue.put(("LOG", "\n===== RIEPILOGO ====="))
+            self.queue.put(("LOG", "\n===== SUMMARY ====="))
             for r in results:
                 tag = "OK" if r["ok"] else "ERR"
                 self.queue.put((tag,
@@ -732,12 +732,12 @@ class TomdGui:
             self.lbl_cur_progress.config(text="--")
             self.pb_cur["value"] = 0
             if self.cancel_flag.is_set():
-                self.status.config(text=f"Annullato ({ok}/{tot} fatti)", foreground="#a00")
+                self.status.config(text=f"Cancelled ({ok}/{tot} done)", foreground="#a00")
             else:
-                self.status.config(text=f"Fatto: {ok}/{tot} OK", foreground="#0a6")
+                self.status.config(text=f"Done: {ok}/{tot} OK", foreground="#0a6")
                 if tot:
                     messagebox.showinfo("Conversion completed",
-                                        f"Completati: {ok} / {tot}")
+                                        f"Completed: {ok} / {tot}")
 
     # ------------------------------------------------------------------------
     # Saving the settings

@@ -160,7 +160,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
     elapsed = res.elapsed or (time.time() - t0)
     note = res.note or ("ok" if res.ok else "error")
     if res.warnings:
-        note += " | avvisi: " + "; ".join(i.code for i in res.warnings)
+        note += " | warnings: " + "; ".join(i.code for i in res.warnings)
     out = {"ok": bool(res.ok), "note": note, "elapsed": elapsed}
     if not res.ok:
         if res.errors:

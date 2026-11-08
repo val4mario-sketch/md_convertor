@@ -359,7 +359,7 @@ def _convert_video_to_video(src: Path, dst: Path, opts: dict) -> tuple[bool, str
     code, _out, err = _run_ffmpeg(args, total_duration=_probe_duration(src))
     if code != 0:
         return False, f"ffmpeg failed (video->video): {_short_err(err)}"
-    return True, f"Video transcodificato ({src.suffix} -> {dst.suffix})."
+    return True, f"Video transcoded ({src.suffix} -> {dst.suffix})."
 
 
 def _convert_video_to_gif(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
@@ -474,7 +474,7 @@ def _convert_to_subtitles(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
         return False, ("Subtitles require openai-whisper: "
                        "pip install -U openai-whisper (and ffmpeg on the PATH).")
     model_name = str(opts.get("whisper_model") or "base")
-    print(f"  Whisper '{model_name}': trascrivo {src.name} (slow on CPU)...",
+    print(f"  Whisper '{model_name}': transcribing {src.name} (slow on CPU)...",
           flush=True)
     model = whisper.load_model(model_name)
     res = model.transcribe(str(src), verbose=False)
@@ -492,8 +492,8 @@ def _convert_to_subtitles(src: Path, dst: Path, opts: dict) -> tuple[bool, str]:
         lines.append(seg["text"].strip())
         lines.append("")
     dst.write_text("\n".join(lines), encoding="utf-8")
-    return True, (f"Sottotitoli {dst.suffix} generati: {len(segs)} segmenti, "
-                  f"lingua {res.get('language', '?')} (Whisper {model_name}).")
+    return True, (f"Subtitles {dst.suffix} generated: {len(segs)} segments, "
+                  f"language {res.get('language', '?')} (Whisper {model_name}).")
 
 
 # ---------------------------------------------------------------------------
@@ -537,7 +537,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
                 "ok": False,
                 "note": (
                     f"Input extension '{src_ext}' not supported. "
-                    f"Supportate: {', '.join(SUPPORTED_INPUTS)}."
+                    f"Supported: {', '.join(SUPPORTED_INPUTS)}."
                 ),
                 "elapsed": time.perf_counter() - t0,
             }
@@ -547,7 +547,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
                 "ok": False,
                 "note": (
                     f"Output extension '{dst_ext}' not supported. "
-                    f"Supportate: {', '.join(SUPPORTED_OUTPUTS)}."
+                    f"Supported: {', '.join(SUPPORTED_OUTPUTS)}."
                 ),
                 "elapsed": time.perf_counter() - t0,
             }
@@ -564,7 +564,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
             return {
                 "ok": False,
                 "note": (
-                    f"Coppia {src_ext} -> {dst_ext} not supported. "
+                    f"Pair {src_ext} -> {dst_ext} not supported. "
                     f"Alternative: {', '.join(alt)}."
                 ),
                 "elapsed": time.perf_counter() - t0,

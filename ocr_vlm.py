@@ -289,7 +289,7 @@ def ensure_model(key: str) -> dict:
         dest = MODELS_DIR / (local or remote)
         if dest.exists() and dest.stat().st_size > 0:
             continue
-        _log(f"Scarico {spec['nome']}: {remote} (one time) ...")
+        _log(f"Downloading {spec['nome']}: {remote} (one time) ...")
         url = f"{HF}/{repo}/resolve/main/{remote}?download=true"
         try:
             _download(url, dest, label=remote)
@@ -329,7 +329,7 @@ def ensure_llamacpp(gpu: bool = False) -> Path:
         raise RuntimeError("llama-server not found (install llama.cpp or set TOMD2_LLAMA_SERVER).")
     flavor = "vulkan-x64" if gpu else "cpu-x64"
     target = MOTORI_DIR / ("llamacpp-vulkan" if gpu else "llamacpp")
-    _log(f"Scarico llama.cpp ({flavor}) from GitHub ...")
+    _log(f"Downloading llama.cpp ({flavor}) from GitHub ...")
     with urllib.request.urlopen(urllib.request.Request(
             "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest",
             headers={"User-Agent": "tomd2"}), timeout=60) as r:
@@ -430,7 +430,7 @@ class LlamaServer:
                 break
             _log("  [warning] start-up failed with the chat template: retrying without.")
         raise RuntimeError(f"llama-server does not start for {self.spec['nome']}: "
-                           f"guarda {LOG_DIR / f'llama_server_{self.key}.log'} "
+                           f"see {LOG_DIR / f'llama_server_{self.key}.log'} "
                            "(often: llama.cpp too old or not enough RAM)")
 
     def stop(self):
@@ -520,7 +520,7 @@ class LlamaServer:
                     speed = ntok / max(now - (t_first or t0), 1e-6)
                     pct = ""
                     if expected_tokens:
-                        pct = f" (~{min(99, int(ntok * 100 / expected_tokens))}% stimato)"
+                        pct = f" (~{min(99, int(ntok * 100 / expected_tokens))}% estimated)"
                     tail = "".join(parts)[-70:].replace("\n", " ").strip()
                     _log(f"    {label} {ntok} token{pct} | {speed:.1f} t/s | ...{tail}")
                 # loop check every ~100 tokens: if it repeats, stop right away
@@ -1350,9 +1350,9 @@ def lettori_extra_formule(formule: list[dict], form_dir: Path, cache_dir: Path):
             _log(f"  [{nome}] loading the model (downloaded the first time) ...")
             mod = FormulaRecognition(model_name=nome, device="cpu")
         except Exception as e:
-            _log(f"  [{nome}] not available ({type(e).__name__}: {e}): salto")
+            _log(f"  [{nome}] not available ({type(e).__name__}: {e}): skipping")
             continue
-        _log(f"  [{nome}] rilegge {len(todo)} doubtful formulas ...")
+        _log(f"  [{nome}] rereads {len(todo)} doubtful formulas ...")
         t_all = time.time()
         for i, f in enumerate(todo, 1):
             try:
@@ -1647,11 +1647,11 @@ def scrivi_da_controllare(report: Path, form_prefix: str, voci: list[dict],
 
     def blocco_formula(v):
         f = v["f"]
-        out = [f"### {f['id']} — pagina {v['pagina']} ({v['stato']})", ""]
+        out = [f"### {f['id']} — page {v['pagina']} ({v['stato']})", ""]
         if f.get("crop"):
             out += [f"![formula {f['id']}]({form_prefix}/{f['crop']})", ""]
         if v["nota"]:
-            out += [f"Differenze: {v['nota']}", ""]
+            out += [f"Differences: {v['nota']}", ""]
         for k in LETTORI_FORMULA:
             if f.get(k):
                 out.append(f"- **{k}**: `{f[k]}`")
@@ -1661,9 +1661,9 @@ def scrivi_da_controllare(report: Path, form_prefix: str, voci: list[dict],
 
     def blocco_mano(v):
         b = v["b"]
-        out = [f"### {b['id']} — pagina {v['pagina']} ({v['stato']})", ""]
+        out = [f"### {b['id']} — page {v['pagina']} ({v['stato']})", ""]
         if b.get("crop"):
-            out += [f"![blocco {b['id']}]({form_prefix}/{b['crop']})", ""]
+            out += [f"![block {b['id']}]({form_prefix}/{b['crop']})", ""]
         if v["nota"]:
             out += [f"Differences in the formulas: {v['nota']}", ""]
         for k in ("chandra", "qwen", "glm"):
@@ -1676,7 +1676,7 @@ def scrivi_da_controllare(report: Path, form_prefix: str, voci: list[dict],
 
     def blocco_fig(v):
         j = v["j"]
-        out = [f"### FIG {j['key']} — pagina {j['page']} ({v['stato']})", ""]
+        out = [f"### FIG {j['key']} — page {j['page']} ({v['stato']})", ""]
         if j.get("crop"):
             out += [f"![figure]({ctrl_prefix}/{j['crop']})", ""]
         if v["nota"]:
@@ -1711,8 +1711,8 @@ def scrivi_da_controllare(report: Path, form_prefix: str, voci: list[dict],
         vuoto = False
         L += ["## Suspicious words (they do not exist in it/en/fr/es/de: possible misreadings)", ""]
         for p, ws in sorted(pp.items()):
-            link = f" — [pagina]({pages_link[p]})" if p in pages_link else ""
-            L.append(f"- pag. {p}{link}: " + ", ".join(ws))
+            link = f" — [page]({pages_link[p]})" if p in pages_link else ""
+            L.append(f"- p. {p}{link}: " + ", ".join(ws))
         L.append("")
     if vuoto:
         L.append("No doubtful points found.")
@@ -2164,7 +2164,7 @@ def glm_verifica_figure(srv_g: ServerPigro, jobs: list[dict], cache_dir: Path, g
                 r = risp.get(str(n), "")
                 if r == "F":
                     c = corr.get(str(n), "")
-                    v["errori"].append(a + (f" (controllore: {c})" if c else ""))
+                    v["errori"].append(a + (f" (checker: {c})" if c else ""))
                 elif r == "N":
                     v["non_verificabili"] += 1
             v["mancanti"] = [str(x) for x in (d.get("mancanti") or []) if str(x).strip()][:10]
@@ -2338,14 +2338,14 @@ def rileggi_blocchi(srv: ServerPigro, chi: str, blocchi: list[dict], form_dir: P
     for i, b in enumerate(todo, 1):
         try:
             im = Image.open(form_dir / b["crop"]).convert("RGB")
-            t = _trascrivi(srv, im, f"[{chi} blocco {b['id']}]")
+            t = _trascrivi(srv, im, f"[{chi} block {b['id']}]")
         except Exception as e:
-            _log(f"    [{chi} blocco {b['id']}] error: {e}")
+            _log(f"    [{chi} block {b['id']}] error: {e}")
             continue
         (cdir / (b["id"] + ".md")).write_text(t, encoding="utf-8")
         b[chi] = compatta_md(t)
         media = (time.time() - t_all) / i
-        _log(f"  [{chi} blocchi] {i}/{len(todo)} | time left {media*(len(todo)-i)/60:.0f} min")
+        _log(f"  [{chi} blocks] {i}/{len(todo)} | time left {media*(len(todo)-i)/60:.0f} min")
 
 
 def glm_arbitra_formule(srv: ServerPigro, formule: list[dict], form_dir: Path, cache_dir: Path):
@@ -2451,7 +2451,7 @@ def guida_per_ia() -> str:
             "> - Handwritten pages (*chandra* engine, marked with ⚠): LOW reliability.\n"
             "> - Figure descriptions: written by a model; the structure is usually "
             "right, the details (handwritten labels, values, directions) may be "
-            "sbagliati.\n"
+            "wrong.\n"
             "> - ⚠ **Uncertain formula** / **Uncertain reading**: the models do not agree; the "
             "alternative readings are given.\n"
             "> When a marked point conflicts with the rest of the text, with other "
@@ -2480,7 +2480,7 @@ def convert_file(src: Path, mode: str, args=None,
                  out_assets: Path | None = None) -> tuple[str, Path]:
     """mode: 'paddle' | 'chandra' | 'ibrido'. Returns (markdown, media_folder).
        During the conversion the PC does not go to sleep by itself."""
-    _log(f"  ocr_vlm versione {VERSIONE}")
+    _log(f"  ocr_vlm version {VERSIONE}")
     _tieni_sveglio(True)
     try:
         return _convert_file(src, mode, args, out_assets)
@@ -2655,7 +2655,7 @@ def _convert_file(src: Path, mode: str, args=None,
                 done_jobs += 1
                 media = sum(stats[key]) / max(1, len(stats[key]))
                 eta = media * (len(todo) - j)
-                _log(f"  [{key}] pagina {p} ({j}/{len(todo)}): {meta.get('secondi',0):.0f} s"
+                _log(f"  [{key}] page {p} ({j}/{len(todo)}): {meta.get('secondi',0):.0f} s"
                      f"{'  [LOOP]' if meta.get('loop') else ''}"
                      f"{'  [CUT AT THE LIMIT]' if meta.get('fermato') == 'limite' else ''}"
                      f"  | time left {eta/60:.0f} min")
@@ -2665,7 +2665,7 @@ def _convert_file(src: Path, mode: str, args=None,
     t_start = time.time()
     retry = run_engine("paddle", plan["paddle"])
     if retry:
-        _log(f"  [ibrido] {len(retry)} suspicious pages go to Chandra: {retry}")
+        _log(f"  [hybrid] {len(retry)} suspicious pages go to Chandra: {retry}")
         total_jobs += len(retry)
     full_chandra = sorted(set(plan["chandra"]) | set(retry))
     run_engine("chandra", full_chandra)
@@ -2683,7 +2683,7 @@ def _convert_file(src: Path, mode: str, args=None,
         blocchi = prepara_blocchi_mano(results, cache_dir, page_image, fig_dir, fig_prefix,
                                        form_dir)
         if blocchi:
-            _log(f"  [mano] {len(blocchi)} blocks with formulas to reread")
+            _log(f"  [handwritten] {len(blocchi)} blocks with formulas to reread")
 
     # 2) printed formulas: Chandra rereads the crops
     formule_finali = []          # (page, formula)
@@ -2817,7 +2817,7 @@ def _convert_file(src: Path, mode: str, args=None,
             cont = {}
             for v in vv:
                 cont[v["stato"]] = cont.get(v["stato"], 0) + 1
-            _log(f"  [verifica {nome}] " + ", ".join(f"{k}: {n}" for k, n in sorted(cont.items())))
+            _log(f"  [check {nome}] " + ", ".join(f"{k}: {n}" for k, n in sorted(cont.items())))
 
     # page images (visual backup, light WebP)
     page_links = {}
@@ -2894,7 +2894,7 @@ def _convert_file(src: Path, mode: str, args=None,
     for p in pages:
         key, md = results.get(p, ("?", "*(page not converted)*"))
         issues += math_issues(md)
-        parts.append(f"\n\n<!-- ===== Pagina {p} di {n} | motore: {key} ===== -->\n")
+        parts.append(f"\n\n<!-- ===== Page {p} of {n} | engine: {key} ===== -->\n")
         if p in page_links:
             parts.append(f"<!-- page image: {page_links[p]} -->\n")
         if key == "chandra" and mode == "ibrido":
@@ -2905,16 +2905,16 @@ def _convert_file(src: Path, mode: str, args=None,
         parts.append("\n" + md + "\n")
     tot = time.time() - t_start
     sp = stats["paddle"]; sc = stats["chandra"]
-    summary = (f"<!-- OCR VLM locale: {len(pages)} pagine | "
+    summary = (f"<!-- OCR VLM locale: {len(pages)} pages | "
                f"Paddle {len(sp)} pages (average {sum(sp)/max(1,len(sp)):.0f} s) | "
                f"Chandra {len(sc)} pages (average {sum(sc)/max(1,len(sc)):.0f} s) | "
                f"verified display formulas: {len(voci)} (doubtful: "
                f"{sum(1 for v in voci if v['stato'] == 'dubbia')}) | "
-               f"verified handwritten blocks: {len(voci_blocchi)} (dubbi: "
+               f"verified handwritten blocks: {len(voci_blocchi)} (doubtful: "
                f"{sum(1 for v in voci_blocchi if v['stato'] == 'dubbia')}) | "
-               f"figures: {len(voci_fig)} (contestate: "
-               f"{sum(1 for v in voci_fig if v['stato'] == 'contestata')}) | vedi {report.name} | "
-               f"formulas with suspicious syntax: {issues} | totale {tot/60:.1f} min -->\n")
+               f"figures: {len(voci_fig)} (disputed: "
+               f"{sum(1 for v in voci_fig if v['stato'] == 'contestata')}) | see {report.name} | "
+               f"formulas with suspicious syntax: {issues} | total {tot/60:.1f} min -->\n")
     _log("  " + summary.strip("<!-> \n"))
     guida = guida_per_ia() if mode == "ibrido" else ""
     return summary + guida + "".join(parts).strip() + "\n", assets
@@ -2938,7 +2938,7 @@ def prova_modello(key: str) -> bool:
             raw, _ = srv.ocr(im, prompt="What text is written in the image? Answer with the text only.",
                              max_tokens=300, label=f"[test {key}]")
         ok = "2026" in raw
-        _log(f"  risposta: {_pulisci(raw)[:80]!r} ({time.time()-t0:.0f} s) -> "
+        _log(f"  answer: {_pulisci(raw)[:80]!r} ({time.time()-t0:.0f} s) -> "
              f"{'WORKS' if ok else 'odd answer, check it'}")
         return ok
     except Exception as e:
@@ -2984,7 +2984,7 @@ def _cli():
             old.rename(bak)
             _log(f"Previous version moved to {bak.name}")
         exe = ensure_llamacpp(False)
-        _log(f"llama.cpp aggiornato: {exe} ({(exe.parent / 'VERSION.txt').read_text() if (exe.parent / 'VERSION.txt').exists() else '?'})")
+        _log(f"llama.cpp updated: {exe} ({(exe.parent / 'VERSION.txt').read_text() if (exe.parent / 'VERSION.txt').exists() else '?'})")
         return
     if a.cmd == "setup":
         ensure_llamacpp(False)

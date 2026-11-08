@@ -509,7 +509,7 @@ def convert_with_csv(src: Path, max_preview_rows: int = 50) -> str:
             break
 
     for tr in title_rows:
-        parts.append(f"_(titolo: **{tr}**)_\n")
+        parts.append(f"_(title: **{tr}**)_\n")
 
     # --- 2) header = next row with all cells filled and NOT numeric ---
     hdr_idx = i
@@ -555,8 +555,8 @@ def convert_with_csv(src: Path, max_preview_rows: int = 50) -> str:
         data_rows.pop()
 
     parts.append(f"**Data rows**: {len(data_rows)}  "
-                 f"**Colonne**: {max_cols}  "
-                 f"**Separatore**: `'{dialect.delimiter}'`\n")
+                 f"**Columns**: {max_cols}  "
+                 f"**Separator**: `'{dialect.delimiter}'`\n")
 
     # --- 3) numeric column statistics ---
     stats = []
@@ -576,7 +576,7 @@ def convert_with_csv(src: Path, max_preview_rows: int = 50) -> str:
             parts.append(f"| {h} | {n} | {mn:.6g} | {av:.6g} | {mx:.6g} |")
 
     # --- 4) data preview ---
-    parts.append("\n## Dati")
+    parts.append("\n## Data")
     if len(data_rows) > max_preview_rows:
         parts.append(f"_(showing the first {max_preview_rows} rows of "
                      f"{len(data_rows)})_\n")
@@ -623,8 +623,8 @@ def convert_with_code(src: Path) -> str:
     parts = [
         f"# {src.name}",
         f"",
-        f"**Linguaggio**: `{lang or '(testo)'}`  "
-        f"**Lines**: {n_lines}  **Dimensione**: {sz/1024:.1f} KB",
+        f"**Language**: `{lang or '(text)'}`  "
+        f"**Lines**: {n_lines}  **Size**: {sz/1024:.1f} KB",
         f"",
         f"{fence}{lang}",
         text.rstrip(),
@@ -649,9 +649,9 @@ def convert_with_ipynb(src: Path) -> str:
         src_lines = cell.get("source", [])
         src_text = "".join(src_lines) if isinstance(src_lines, list) else str(src_lines)
         if ctype == "markdown":
-            parts.append(f"<!-- Cella {i}: markdown -->\n{src_text}\n")
+            parts.append(f"<!-- Cell {i}: markdown -->\n{src_text}\n")
         elif ctype == "code":
-            parts.append(f"<!-- Cella {i}: code -->")
+            parts.append(f"<!-- Cell {i}: code -->")
             parts.append(f"```{lang}")
             parts.append(src_text.rstrip())
             parts.append("```")
@@ -676,7 +676,7 @@ def convert_with_ipynb(src: Path) -> str:
                     parts.append(f"\n*Error:* `{out.get('ename','')}: {out.get('evalue','')}`")
             parts.append("")
         elif ctype == "raw":
-            parts.append(f"<!-- Cella {i}: raw -->\n```\n{src_text.rstrip()}\n```\n")
+            parts.append(f"<!-- Cell {i}: raw -->\n```\n{src_text.rstrip()}\n```\n")
     return "\n".join(parts) + "\n"
 
 
@@ -750,7 +750,7 @@ def convert_with_eml(src: Path, media_dirname: str = "media") -> tuple[str, Path
             pass
 
     if attachments:
-        parts.append("\n## Allegati\n")
+        parts.append("\n## Attachments\n")
         parts.append("| Name | Size | Link |")
         parts.append("|---|---|---|")
         for orig, safe, sz in attachments:
@@ -826,7 +826,7 @@ def _inline_convert(sub: Path, args) -> str:
     if eng == "markitdown": return convert_with_markitdown(sub)
     if eng == "passthrough":
         return f"```\n{sub.read_text(encoding='utf-8', errors='replace')}\n```"
-    return f"_(estensione {sub.suffix} not handled inline)_"
+    return f"_(extension {sub.suffix} not handled inline)_"
 
 
 # ----------------------------------------------------------------------------
@@ -914,7 +914,7 @@ def convert_with_media(src: Path, model: str = "base") -> str:
         import whisper
     except ImportError:
         return (f"# {src.name}\n\n"
-                f"**Tipo**: {('audio' if src.suffix.lower() in AUDIO_EXT else 'video')} "
+                f"**Type**: {('audio' if src.suffix.lower() in AUDIO_EXT else 'video')} "
                 f"({src.suffix})\n\n"
                 f"⚠ Cannot transcribe: **openai-whisper** is missing. Install:\n"
                 f"```\n"
@@ -931,7 +931,7 @@ def convert_with_media(src: Path, model: str = "base") -> str:
     res = m.transcribe(str(src), verbose=False)
     parts = [f"# {src.name}", "",
              f"**Automatic transcription** (Whisper, model `{model}`, "
-             f"lingua: {res.get('language','?')})", ""]
+             f"language: {res.get('language','?')})", ""]
     for seg in res.get("segments", []):
         t0 = seg["start"]; t1 = seg["end"]
         def _ts(s): return f"{int(s//60):02d}:{int(s%60):02d}"
@@ -992,7 +992,7 @@ def _render_pages_to_png(src: Path, assets: Path, pages_1based: set[int],
             pix.save(str(pages_dir / fn))
             result[n] = fn
         except Exception as e:
-            print(f"  [WARN] render pagina {n} fallito: {e}", file=sys.stderr)
+            print(f"  [WARN] render pagina {n} failed: {e}", file=sys.stderr)
     doc.close()
     return result
 
@@ -1107,19 +1107,19 @@ def convert_with_pymupdf4llm(src: Path, page_images: bool,
         needs_fallback = (raw_chars >= 200 and
                           text_only_chars < raw_chars * 0.5)
 
-        parts.append(f"\n\n<!-- ===== Pagina {page_no} di {n_pages} ===== -->\n")
+        parts.append(f"\n\n<!-- ===== Page {page_no} of {n_pages} ===== -->\n")
         # link to the page render (if present) BEFORE the text
         if page_no in page_img_map:
             rel = f"{asset_prefix}/_pages/{page_img_map[page_no]}"
             if opt_lean_md:
                 # "lean" version: compact link, no <details>
-                parts.append(f"\n![pagina {page_no}]({rel})\n")
+                parts.append(f"\n![page {page_no}]({rel})\n")
             else:
                 parts.append(
                     f"\n<details><summary>"
-                    f"Pagina {page_no} (high-resolution image — diagram guarantee)"
+                    f"Page {page_no} (high-resolution image — diagram guarantee)"
                     f"</summary>\n\n"
-                    f"![pagina {page_no}]({rel})\n\n"
+                    f"![page {page_no}]({rel})\n\n"
                     f"</details>\n"
                 )
         parts.append("\n" + text.strip() + "\n")
@@ -1227,11 +1227,11 @@ def convert_with_ocr_scan(src: Path, page_image_dpi: int = 150,
         pix = page.get_pixmap(matrix=mat, alpha=False)
         png_name = f"page_{i+1:04d}.png"
         pix.save(str(pages_dir / png_name))
-        parts.append(f"\n\n<!-- ===== Pagina {i+1} di {n} ===== -->\n")
+        parts.append(f"\n\n<!-- ===== Page {i+1} of {n} ===== -->\n")
         parts.append(
             f"\n<details><summary>Pagina {i+1} (original scan image)"
             f"</summary>\n\n"
-            f"![pagina {i+1}]({asset_prefix}/_pages/{png_name})\n\n"
+            f"![page {i+1}]({asset_prefix}/_pages/{png_name})\n\n"
             f"</details>\n")
         if text:
             parts.append("\n" + text + "\n")
@@ -1394,10 +1394,10 @@ def convert_with_ocr_tesseract_pdf(src: Path, page_image_dpi: int = 200,
         except RuntimeError as e:
             doc.close()
             raise RuntimeError(str(e))
-        parts.append(f"\n\n<!-- ===== Pagina {i+1} di {n} ===== -->\n")
+        parts.append(f"\n\n<!-- ===== Page {i+1} of {n} ===== -->\n")
         parts.append(
             f"\n<details><summary>Pagina {i+1} (scan image)"
-            f"</summary>\n\n![pagina {i+1}]({asset_prefix}/_pages/{png_name})\n\n"
+            f"</summary>\n\n![page {i+1}]({asset_prefix}/_pages/{png_name})\n\n"
             f"</details>\n")
         parts.append("\n" + (text if text else
                      "_(no text detected on this page)_") + "\n")
@@ -1470,8 +1470,8 @@ def convert_with_ai_pack(src: Path, media_dirname: str = "media",
             except Exception:
                 pass
 
-        parts.append(f"\n\n<!-- ===== Pagina {i+1} di {n} ===== -->\n")
-        parts.append(f"\n![pagina {i+1}]({asset_prefix}/_pages/{webp_name})\n")
+        parts.append(f"\n\n<!-- ===== Page {i+1} of {n} ===== -->\n")
+        parts.append(f"\n![page {i+1}]({asset_prefix}/_pages/{webp_name})\n")
         if text:
             parts.append("\n" + text + "\n")
         if (i + 1) % 10 == 0 or i + 1 == n:
@@ -1598,12 +1598,12 @@ def convert_with_marker(src: Path, force_ocr: bool,
                             # minimal validation: the .md must be non-empty
                             txt = produced.read_text(encoding="utf-8")
                             if len(txt.strip()) > 50:
-                                print(f"  [blocco {idx}/{len(chunks)}] pagine {ps}-{pe} "
+                                print(f"  [block {idx}/{len(chunks)}] pages {ps}-{pe} "
                                       f"ALREADY DONE, skipping (resume)")
                                 rel = produced.parent.relative_to(src.parent).as_posix()
                                 txt = _rewrite_image_paths(txt, rel)
                                 merged.append(
-                                    f"\n\n<!-- ===== Blocco {idx} - pagine {ps}-{pe} "
+                                    f"\n\n<!-- ===== Block {idx} - pages {ps}-{pe} "
                                     f"(resume) ===== -->\n\n" + txt.strip() + "\n")
                                 skipped += 1
                                 continue
@@ -1613,7 +1613,7 @@ def convert_with_marker(src: Path, force_ocr: bool,
                     if chunk_out.exists():
                         shutil.rmtree(chunk_out)
                     chunk_out.mkdir(parents=True, exist_ok=True)
-                    print(f"  [blocco {idx}/{len(chunks)}] pagine {ps}-{pe} ...")
+                    print(f"  [block {idx}/{len(chunks)}] pages {ps}-{pe} ...")
                     _run_marker_single(chunk_pdf, chunk_out, force_ocr)
                     mds = list(chunk_out.rglob("*.md"))
                     if not mds:
@@ -1623,12 +1623,12 @@ def convert_with_marker(src: Path, force_ocr: bool,
                     rel = produced.parent.relative_to(src.parent).as_posix()
                     text = _rewrite_image_paths(text, rel)
                     merged.append(
-                        f"\n\n<!-- ===== Blocco {idx} - pagine {ps}-{pe} ===== -->\n\n"
+                        f"\n\n<!-- ===== Block {idx} - pages {ps}-{pe} ===== -->\n\n"
                         + text.strip() + "\n")
                     done += 1
             if skipped:
                 print(f"  [resume] skipped {skipped} blocks already finished, "
-                      f"rifatti {done}")
+                      f"redone {done}")
             full_md = "".join(merged)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -1663,8 +1663,8 @@ def quality_report(md_text: str, assets: Path | None, elapsed: float | None = No
         n_figure = sum(1 for f in assets.rglob("*")
                        if f.suffix.lower() in IMAGE_EXT)
     bits = []
-    if n_pages is not None: bits.append(f"{n_pages} pagine")
-    bits.append(f"{n_chars} caratteri")
+    if n_pages is not None: bits.append(f"{n_pages} pages")
+    bits.append(f"{n_chars} characters")
     bits.append(f"~{n_tabelle} table rows")
     bits.append(f"~{n_formule} formulas")
     bits.append(f"{n_figure} figures")
@@ -1813,7 +1813,7 @@ def convert_one(src: Path, args) -> dict:
         text = _encode_md_link_urls(text)
 
         header = (f"<!-- Generated by tomd2.py | source: {src.name} | "
-                  f"motore: {engine} -->\n\n")
+                  f"engine: {engine} -->\n\n")
         out_md.write_text(header + text.strip() + "\n", encoding="utf-8")
 
         # AI image descriptions (optional, --describe-images):
@@ -1827,8 +1827,8 @@ def convert_one(src: Path, args) -> dict:
                            or img_describe.DEFAULT_MODEL)
                 print(f"  AI image descriptions (model {_vmodel}) ...")
                 st = img_describe.enrich_markdown(out_md, model=_vmodel)
-                info["note"] = (f"AI descriptions: {st['done']} nuove, "
-                                f"{st['cached']} from cache, {st['failed']} fallite")
+                info["note"] = (f"AI descriptions: {st['done']} new, "
+                                f"{st['cached']} from cache, {st['failed']} failed")
             except Exception as e:
                 info["note"] = f"AI descriptions NOT added: {e}"
                 print(f"  [WARN] {info['note']}", file=sys.stderr)
@@ -1838,7 +1838,7 @@ def convert_one(src: Path, args) -> dict:
                     report=quality_report(text, assets, elapsed, n_pages),
                     elapsed=elapsed)
     except subprocess.CalledProcessError as e:
-        info["note"] = f"marker ERROR (code {e.returncode}): controlla RAM/modelli."
+        info["note"] = f"marker ERROR (code {e.returncode}): check RAM/models."
     except Exception as e:
         info["note"] = f"ERROR: {type(e).__name__}: {e}"
     return info
@@ -1945,7 +1945,7 @@ def main():
         args.url_dest.mkdir(parents=True, exist_ok=True)
         for u in urls:
             try:
-                print(f"Scarico {u} ...")
+                print(f"Downloading {u} ...")
                 _, _, out_md = convert_with_url(u, args.url_dest, args)
                 # the downloaded file has already been converted to .md;
                 # mark it as "done" by creating the .md entry
@@ -1973,7 +1973,7 @@ def main():
             print(f"\n>>> {f.name}")
             results.append(convert_one(f, args))
 
-    print("\n=================  RIEPILOGO  =================")
+    print("\n=================  SUMMARY  =================")
     ok = sum(1 for r in results if r["ok"])
     for r in results:
         flag = "OK " if r["ok"] else "ERR"

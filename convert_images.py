@@ -382,7 +382,7 @@ def convert(src: Path, dst: Path, opts: Optional[dict] = None) -> dict:
         return _result(
             False,
             (
-                f"Conversione {src_ext}->{dst_ext} not supported. "
+                f"Conversion {src_ext}->{dst_ext} not supported. "
                 f"Alternatives from {src_ext}: {alts}"
             ),
             t0,
@@ -501,7 +501,7 @@ def convert(src: Path, dst: Path, opts: Optional[dict] = None) -> dict:
         # ImageMagick fallback (e.g. multi-page TIFF or missing codecs).
         ok, mg_note = _try_imagemagick(src, dst)
         if ok:
-            note_extra = f" (Pillow failed: {e}; usato {mg_note})"
+            note_extra = f" (Pillow failed: {e}; used {mg_note})"
         else:
             return _result(
                 False,
@@ -527,7 +527,7 @@ def _finalize(dst: Path, src_ext: str, dst_ext: str, t0: float, extra: str = "")
         return _result(False, f"Cannot read the output file: {e}", t0)
     if size <= 0:
         return _result(False, "The output file is empty.", t0)
-    return _result(True, f"Conversione {src_ext}->{dst_ext} riuscita ({size} byte).{extra}", t0)
+    return _result(True, f"Conversion {src_ext}->{dst_ext} successful ({size} byte).{extra}", t0)
 
 
 # ---------------------------------------------------------------------------

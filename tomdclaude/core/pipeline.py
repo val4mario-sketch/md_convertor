@@ -44,7 +44,7 @@ def convert(src, dst=None, opts=None, *, logger=None) -> ConversionResult:
     if conv is None:
         avail = targets_for(src.suffix)
         nota = (
-            f"Conversione {norm_ext(src.suffix)} -> {norm_ext(dst.suffix)} not supported. "
+            f"Conversion {norm_ext(src.suffix)} -> {norm_ext(dst.suffix)} not supported. "
             + (f"Destinations available for this file: {avail}." if avail
                else "No registered converter accepts this input format.")
         )

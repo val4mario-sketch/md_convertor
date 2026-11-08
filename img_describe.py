@@ -168,7 +168,7 @@ def ensure_model(model: str = DEFAULT_MODEL, log=_log_flush) -> None:
                 continue
             st = json.loads(line)
             if st.get("error"):
-                raise RuntimeError(f"pull of '{model}' fallito: {st['error']}")
+                raise RuntimeError(f"pull of '{model}' failed: {st['error']}")
             if "completed" in st and "total" in st and st["total"]:
                 pct = 100 * st["completed"] // st["total"]
                 print(f"\r  [IA] download {model}: {pct}%", end="", flush=True)
@@ -417,7 +417,7 @@ def enrich_markdown(md_path: Path, model: str = DEFAULT_MODEL,
                 try:
                     desc = _call()
                 except Exception:
-                    log(f"  [IA] {pos}/{len(jobs)} ERROR on {p.name}: {e}")
+                    log(f"  [AI] {pos}/{len(jobs)} ERROR on {p.name}: {e}")
                     stats["failed"] += 1
                     continue
             n_calls += 1
@@ -436,7 +436,7 @@ def enrich_markdown(md_path: Path, model: str = DEFAULT_MODEL,
         else:
             lines[i+1:i+1] = ["", block]
         processed += 1
-        log(f"  [IA] {pos}/{len(jobs)} ({src}) {p.name}")
+        log(f"  [AI] {pos}/{len(jobs)} ({src}) {p.name}")
 
         # periodic save: long job, lose nothing
         if processed % 15 == 0:
@@ -445,8 +445,8 @@ def enrich_markdown(md_path: Path, model: str = DEFAULT_MODEL,
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     _keep_awake(False)
     dt = time.time() - t_start
-    log(f"  [AI] finished in {dt/60:.1f} min: {stats['done']} nuove, "
-        f"{stats['cached']} from cache, {stats['skipped']} saltate, "
+    log(f"  [AI] finished in {dt/60:.1f} min: {stats['done']} new, "
+        f"{stats['cached']} from cache, {stats['skipped']} skipped, "
         f"{stats['failed']} failed (out of {stats['total']})")
     return stats
 

@@ -59,7 +59,7 @@ def convert(src: Path, dst: Path, opts: dict | None = None) -> dict:
     if dst_ext not in SUPPORTED_OUTPUTS:
         return {"ok": False,
                 "note": (f"convert_markdown only supports .md / .markdown output "
-                         f"(ricevuto {dst_ext})."),
+                         f"(received {dst_ext})."),
                 "elapsed": 0.0}
 
     # Build an args object compatible with the tomd2 CLI

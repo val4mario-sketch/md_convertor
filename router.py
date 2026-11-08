@@ -198,13 +198,13 @@ def _messaggio_conversione_impossibile(s_ext: str, d_ext: str) -> str:
     out_disp = supported_outputs_for(s_ext)
     tutti_out = sorted({o for outs in out_disp.values() for o in outs} - {s_ext})
     if not tutti_out:
-        msg = (f"Conversione {s_ext} -> {d_ext} NOT supported.\n"
+        msg = (f"Conversion {s_ext} -> {d_ext} NOT supported.\n"
                f"   I know of no conversion starting from {s_ext}.\n"
                f"   Use --list to see all the supported pairs.")
     else:
-        msg = (f"Conversione {s_ext} -> {d_ext} NOT supported.\n"
-               f"   Source category: {s_cat}   |   destinazione: {d_cat}\n"
-               f"   Da {s_ext} can be converted to: "
+        msg = (f"Conversion {s_ext} -> {d_ext} NOT supported.\n"
+               f"   Source category: {s_cat}   |   target: {d_cat}\n"
+               f"   From {s_ext} can be converted to: "
                f"{', '.join(tutti_out)}.\n"
                f"   Example: --to {tutti_out[0][1:]}")
     return msg

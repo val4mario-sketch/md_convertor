@@ -33,7 +33,7 @@ class ValidationIssue:
     def __str__(self) -> str:
         base = f"[{self.level.upper()}] {self.code}: {self.message}"
         if self.expected is not None or self.actual is not None:
-            base += f"  (atteso={self.expected!r}, ottenuto={self.actual!r})"
+            base += f"  (expected={self.expected!r}, got={self.actual!r})"
         return base
 
 

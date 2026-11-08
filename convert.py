@@ -207,7 +207,7 @@ def main():
             for ln in r.get("note","").splitlines()[1:6]:
                 print(f"       {ln}")
 
-    print("\n========== RIEPILOGO ==========")
+    print("\n========== SUMMARY ==========")
     ok = sum(1 for r in results if r["ok"])
     for r in results:
         flag = "OK " if r["ok"] else "ERR"
